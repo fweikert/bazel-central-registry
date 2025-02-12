@@ -26,6 +26,7 @@ import hashlib
 import json
 import netrc
 import pathlib
+import posixpath
 import re
 import shutil
 import urllib.parse
@@ -300,6 +301,13 @@ module(
     def get_module_dot_bazel_path(self, module_name, version):
         return self.get_version_dir(module_name, version) / "MODULE.bazel"
 
+    def get_attestations(self, module_name, version):
+        path = self.get_version_dir(module_name, version) / "attestations.json"
+        if not path.exists():
+            return None
+        
+        return json.loads(path.read_text())
+
     def contains(self, module_name, version=None):
         """
         Check if the registry contains a module or a specific version of a
@@ -518,3 +526,48 @@ module(
         if version in metadata["versions"]:
             metadata["versions"].remove(version)
         json_dump(metadata_path, metadata)
+
+
+def _download_if_exists(url):
+    try:
+        return download(url)
+    except urllib.error.HTTPError as ex:
+        if ex.code == 404:
+            return None
+
+        raise RegistryException(f"Failed to read {url}: {ex.reason}")
+
+
+class UpstreamRegistry:
+
+    def __init__(self, org="bazelbuild", repo="bazel-central-registry", branch="main")
+        self._root_url = f"https://raw.githubusercontent.com/{org}/{repo}/refs/heads/{branch}/modules"
+
+    def get_latest_module_version(module_name):
+        metadata_url = posixpath.join(self._root_url, module_name, "metadata.json")
+        content = _download_if_exists(metadata_url)
+        if not content:
+            return None
+
+        metadata = json.loads(metadata.json)
+        latest_version = metadata["versions"][-1]  # Presubmit ensures asc. order
+        module_root_url = posixpath.join(self._root_url, module_name, latest_version)
+        return ModuleSnapshot(latest_version, module_root_url)
+  
+
+class ModuleSnapshot:
+
+    def __init__(version, root_url):
+        self.version = version
+        self._root_url = root_url
+        
+    def _download_if_exists(filename):
+        return _download_if_exists(posixpath.join(self._root_url, filename))
+
+    def presubmit():
+        return self._download_if_exists("presubmit.yaml")
+  
+    def attestations():
+        raw = self._download_if_exists("attestations.json")
+        if raw:
+            return json.loads(raw)

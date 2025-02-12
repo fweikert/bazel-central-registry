@@ -25,23 +25,27 @@ Validations performed are:
   - Verify if the presubmit.yml file matches the previous version
     - If not, we should require BCR maintainer review.
   - Verify the checked in MODULE.bazel file matches the one in the extracted and patched source tree.
+  - Verify provenance referenced by attestations.json (if it exists).
 """
 
 import argparse
 import ast
+import dataclasses
+import hashlib
 import json
-import subprocess
-from pathlib import Path
+import os
+import platform
 import re
 import requests
 import shutil
+import subprocess
 import sys
 import tempfile
-import os
 import yaml
 
-from enum import Enum
 from difflib import unified_diff
+from enum import Enum
+from pathlib import Path
 from urllib.parse import urlparse
 
 from registry import RegistryClient
@@ -70,6 +74,27 @@ COLOR = {
     BcrValidationResult.NEED_BCR_MAINTAINER_REVIEW: YELLOW,
     BcrValidationResult.FAILED: RED,
 }
+
+ATTESTATIONS_DOCS_URL = "https://github.com/bazelbuild/bazel-central-registry/blob/main/docs/attestations.md"
+ACCEPTED_ATTESTATION_TYPES = frozenset(["TODO"])
+
+SLSA_VERIFIER_URL_TEMPLATE = (
+    "https://github.com/slsa-framework/slsa-verifier/releases/download/{version}/slsa-verifier-{os}-{arch}{ext}"
+)
+SLSA_VERIFIER_SHA256SUM_URL = (
+    "https://raw.githubusercontent.com/slsa-framework/slsa-verifier/refs/heads/main/SHA256SUM.md"
+)
+DEFAULT_SLSA_VERIFIER_VERSION = "v2.7.0"
+
+PROTOCOL_RE = re.compile(r"^http(s)?://")
+GITHUB_REPO_RE = re.compile(r"^(https://github.com/|github:)([^/]+/[^/]+)$")
+
+
+@dataclasses.dataclass(frozen=True)
+class Provenance:
+    url: str
+    integrity: str
+    artifact_url_or_path: str
 
 
 def print_collapsed_group(name):
@@ -196,12 +221,28 @@ class BcrValidationException(Exception):
     """
 
 
+class AttestationsError(Exception):
+    """
+    Raised whenever we encounter a problem related to attestations.
+    """
+
+
 class BcrValidator:
-    def __init__(self, registry, should_fix):
+
+    def __init__(self, registry, upstream, should_fix, slsa_verifier_version=DEFAULT_SLSA_VERIFIER_VERSION):
         self.validation_results = []
         self.registry = registry
+        self.upstream = upstream
         # Whether the validator should try to fix the detected error.
         self.should_fix = should_fix
+        self._slsa_verifier_version = slsa_verifier_version
+        self._slsa_verifier_path = self._get_slsa_verifier_path()
+
+    def _get_slsa_verifier_path(self):
+        return Path(tempfile.mkdtemp() / f"basename{self._get_binary_extension()}")
+
+    def _get_binary_extension(self):
+        return ".exe" if platform.system().lower() == "windows" else ""
 
     def report(self, type, message):
         color = COLOR[type]
@@ -297,8 +338,7 @@ class BcrValidator:
             return
         source_url = self.registry.get_source(module_name, version)["url"]
         expected_integrity = self.registry.get_source(module_name, version)["integrity"]
-        algorithm, _ = expected_integrity.split("-", 1)
-        real_integrity = integrity(download(source_url), algorithm)
+        real_integrity = self._calculate_integrity(download(source_url), expected_integrity)
         if real_integrity != expected_integrity:
             self.report(
                 BcrValidationResult.FAILED,
@@ -310,6 +350,10 @@ class BcrValidator:
                 BcrValidationResult.GOOD,
                 "The source archive's integrity value matches.",
             )
+
+    def _calculate_integrity(self, raw_content, expected_integrity):
+        algorithm, _ = expected_integrity.split("-", 1)
+        return integrity(raw_content, algorithm)
 
     def verify_git_repo_source_stability(self, module_name, version):
         """Verify git repositories are specified in a stable way."""
@@ -352,26 +396,22 @@ class BcrValidator:
 
     def verify_presubmit_yml_change(self, module_name, version):
         """Verify if the presubmit.yml is the same as the previous version."""
-        versions = self.registry.get_metadata(module_name)["versions"]
-        versions.sort(key=Version)
-        index = versions.index(version)
-        if index == 0:
+        latest_snapshot = self.upstream.get_latest_module_version(module_name)
+        if not latest_snapshot:
             self.report(
                 BcrValidationResult.NEED_BCR_MAINTAINER_REVIEW,
                 f"Module version {module_name}@{version} is new, the presubmit.yml file "
                 "should be reviewed by a BCR maintainer.",
             )
-        elif index > 0:
-            pre_version = versions[index - 1]
-            previous_presubmit_yml = self.registry.get_presubmit_yml_path(module_name, pre_version)
-            previous_presubmit_content = open(previous_presubmit_yml, "r").readlines()
+        else:
+            previous_presubmit_content = latest_snapshot.presubmit()
             current_presubmit_yml = self.registry.get_presubmit_yml_path(module_name, version)
             current_presubmit_content = open(current_presubmit_yml, "r").readlines()
             diff = list(
                 unified_diff(
                     previous_presubmit_content,
                     current_presubmit_content,
-                    fromfile=str(previous_presubmit_yml),
+                    fromfile="HEAD",
                     tofile=str(current_presubmit_yml),
                 )
             )
@@ -379,7 +419,7 @@ class BcrValidator:
                 self.report(
                     BcrValidationResult.NEED_BCR_MAINTAINER_REVIEW,
                     f"The presubmit.yml file of {module_name}@{version} doesn't match its previous version "
-                    f"{module_name}@{pre_version}, the following presubmit.yml file change "
+                    f"{module_name}@{latest_snapshot.version}, the following presubmit.yml file change "
                     "should be reviewed by a BCR maintainer.\n    " + "    ".join(diff),
                 )
             else:
@@ -600,6 +640,7 @@ class BcrValidator:
             self.verify_presubmit_yml_change(module_name, version)
         self.validate_presubmit_yml(module_name, version)
         self.verify_module_dot_bazel(module_name, version)
+        self.verify_attestations(module_name, version)
 
     def validate_all_metadata(self):
         print_expanded_group("Validating all metadata.json files")
@@ -645,6 +686,217 @@ class BcrValidator:
 
         if not has_error:
             self.report(BcrValidationResult.GOOD, "All metadata.json files are valid.")
+
+    def verify_attestations(self, module_name, version):
+        attestations = self.registry.get_attestations(module_name, version)
+        if not attestations:
+            # TODO: turn this into a warning?
+            self.report(BcrValidationResult.GOOD, "No attestations to check.")
+            return
+
+        # Compare to previous attestations
+        latest_snapshot = self.upstream.get_latest_module_version(module_name)
+        previous_attestation_types = latest_snapshot.attestations()["types"] if latest_snapshot else []
+
+        try:
+            provenances = self._parse_and_validate_attestations_json(
+                module_name, version, attestations, previous_attestation_types
+            )
+        except AttestationsError as ex:
+            self.report(
+                BcrValidationResult.FAILED,
+                (
+                    f"{module_name}@{version}: Encountered an error in attestations.json:"
+                    " {ex} Please follow {ATTESTATIONS_DOCS_URL}."
+                ),
+            )
+            return
+
+        source_uri = self.get_source_uri(module_name, version)
+        if not source_uri:
+            self.report(
+                BcrValidationResult.FAILED,
+                (
+                    f"{module_name}@{version}: Could not determine source URI. "
+                    "Please ensure that metadata.json contains a single GitHub repository."
+                ),
+            )
+            return
+
+        slsa_verifier_path = self._download_slsa_verifier()
+        success = True
+        tmp_dir = tempfile.mkdtemp()
+        for p in provenances:
+            try:
+                self._run_slsa_verifier(slsa_verifier_path, p, source_uri, version, tmp_dir)
+            except AttestationsError as ex:
+                self.report(f"{module_name}@{version}: {ex}")
+                success = False
+
+        if success:
+            self.report(
+                BcrValidationResult.GOOD,
+                f"Successfully verified attestations for {module_name}@{version}.",
+            )
+
+    def _parse_and_validate_attestations_json(self, module_name, version, data, previous_attestation_types):
+        self._assert_is_dict_with_keys(data, ["types", "attestations"])
+
+        types = data.get("types")
+        if not types:
+            raise AttestationsError("Missing list of attestation types.")
+
+        invalid_types = set(types).difference(ACCEPTED_ATTESTATION_TYPES)
+        if invalid_types:
+            raise AttestationsError(f"Attestation types {invalid_types} are currently unsupported.")
+
+        removed_types = set(previous_attestation_types).difference(types)
+        if removed_types:
+            raise AttestationsError(f"")  # TODO
+
+        source_url = self.registry.get_source()["url"]
+        url_prefix, _, archive_basename = source_url.rpartition("/")
+
+        full_locations = {
+            "source.json": self.registry.get_source_json_path(module_name, version),
+            "MODULE.bazel": self.registry.get_module_dot_bazel_path(module_name, version),
+            archive_basename: source_url,
+        }
+
+        attestations = data.get("attestations")
+        self._assert_is_dict_with_keys(attestations, list(full_locations.keys()))
+
+        provenances = []
+        for basename, metadata in attestations.items():
+            self._assert_is_dict_with_keys(metadata, ["url", "integrity"])
+
+            expected_url = f"{url_prefix}/{basename}.intoto.jsonl"
+            url = metadata["url"]
+            if url != expected_url:
+                raise AttestationsError(f"Expected url {expected_url}, but got {url} in {basename} attestation.")
+
+            integrity = metadata["integrity"]
+            if not integrity:
+                raise AttestationsError(f"Missing `integrity` field for {basename} attestation.")
+
+            provenances.append(
+                Provenance(
+                    url=url,
+                    integrity=integrity,
+                    artifact_url_or_path=full_locations[basename],
+                )
+            )
+
+        return provenances
+
+    def _assert_is_dict_with_keys(self, candidate, keys):
+        if not isinstance(candidate, dict):
+            raise AttestationsError("Expected a dictionary.")
+        if set(keys).symmetric_difference(candidate.keys()):
+            raise AttestationsError(f"Expected keys {keys}, but got {candidate.keys()}.")
+
+    def get_source_uri(self, module_name, version):
+        repos = self.registry.get_metadata(module_name)["repository"]
+        if len(repos) != 1:
+            return None
+
+        m = GITHUB_REPO_RE.match(repos[0])
+        return f"github.com/{m.group(2)}" if m else None
+
+    def _download_slsa_verifier(self):
+        dest = self._get_slsa_verifier_path()
+        if dest.exists():
+            return dest
+
+        raw_content = download(self._get_slsa_verifier_url())
+        self._check_slsa_verifier_sha256sum(raw_content, os.path.basename(dest))
+
+        with open(dest, "wb") as f:
+            f.write(raw_content)
+
+        os.chmod(dest, 0o755)
+        return dest
+
+    def _get_slsa_verifier_url(self):
+        osname = platform.system().lower()
+        m = platform.machine()
+        arch = m if m == "arm64" else "amd64"
+        return SLSA_VERIFIER_URL_TEMPLATE.format(
+            version=self._slsa_verifier_version, os=osname, arch=arch, ext=self._get_binary_extension()
+        )
+
+    def _check_slsa_verifier_sha256sum(self, raw_content, binary_name):
+        actual_hash = hashlib.sha256(raw_content).hexdigest()
+        pattern = re.compile(rf"^{actual_hash}\s+{binary_name}$", re.MULTILINE)
+
+        sha256sums = download(SLSA_VERIFIER_SHA256SUM_URL).decode("utf-8")
+
+        # Unfortunately the file contains Markdown.
+        needle = f"[{self._slsa_verifier_version}]"
+        for version_block in sha256sums.split("###"):
+            if needle in version_block:
+                if pattern.search(version_block):
+                    return
+                break
+
+        # Raise BcrValidationException instead of AttestationsError since the problem
+        # has nothing to do with the module.
+        raise BcrValidationException(
+            f"{binary_name}@{self._slsa_verifier_version}: "
+            f"could not find actual checksum {actual_hash} in {SLSA_VERIFIER_SHA256SUM_URL}"
+        )
+
+    def _run_slsa_verifier(self, slsa_verifier_path, provenance, source_uri, source_tag, tmp_dir):
+        provenance_basename = os.path.basename(provenance.url)
+        raw_provenance = download(provenance.url)
+        actual_integrity = self._calculate_integrity(raw_provenance, provenance.integrity)
+        if actual_integrity != provenance.integrity:
+            raise AttestationsError(
+                f"{provenance_basename} has expected integrity `{provenance.integrity}`, but the actual value is `{actual_integrity}`"
+            )
+
+        provenance_path = os.path.join(tmp_dir, provenance_basename)
+        with open(provenance_path, "wb") as f:
+            f.write(raw_provenance)
+
+        artifact_path = self._download_if_required(provenance.artifact_url_or_path, tmp_dir)
+
+        result = subprocess.run(
+            [
+                slsa_verifier_path,
+                "verify-artifact",
+                "--provenance-path",
+                provenance_path,
+                "--source-uri",
+                source_uri,
+                "--source-tag",
+                source_tag,
+                artifact_path,
+            ],
+            capture_output=True,
+            encoding="utf-8",
+        )
+
+        if result.returncode:
+            raise AttestationsError(
+                "\n".join(
+                    "SLSA verifier failed:",
+                    f"\tArtifact: {artifact_path}",
+                    f"\tProvenance: {provenance.url}",
+                    "Output:",
+                    result.stderr,
+                )
+            )
+        # TODO: --builder-id, check blessed GHA action
+        # TODO: VSA
+
+    def _download_if_required(self, url_or_path, tmp_dir):
+        if not PROTOCOL_RE.match(url_or_path):
+            return url_or_path
+
+        dest = os.path.join(tmp_dir, os.path.dirname(url_or_path))
+        download_file(url_or_path, dest)
+        return dest
 
     def global_checks(self):
         """General global checks for BCR"""
@@ -725,8 +977,11 @@ def main(argv=None):
         for name, version in module_versions:
             print(f"{name}@{version}")
 
+    # TODO: Read org etc from flags to support forks.
+    upstream = registry.UpstreamRegistry()
+
     # Validate given module version.
-    validator = BcrValidator(registry, args.fix)
+    validator = BcrValidator(registry, upstream, args.fix)
     for name, version in module_versions:
         validator.validate_module(name, version, args.skip_validation)
 

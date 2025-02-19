@@ -844,7 +844,7 @@ class BcrValidator:
         # has nothing to do with the module.
         raise BcrValidationException(
             f"{binary_name}@{self._slsa_verifier_version}: "
-            f"could not find actual checksum {actual_hash} in {SLSA_VERIFIER_SHA256SUM_URL}"
+            f"could not find actual checksum {actual_hash} in {SLSA_VERIFIER_SHA256SUM_URL}."
         )
 
     def _run_slsa_verifier(self, slsa_verifier_path, provenance, source_uri, source_tag, tmp_dir):
@@ -853,7 +853,8 @@ class BcrValidator:
         actual_integrity = self._calculate_integrity(raw_provenance, provenance.integrity)
         if actual_integrity != provenance.integrity:
             raise AttestationsError(
-                f"{provenance_basename} has expected integrity `{provenance.integrity}`, but the actual value is `{actual_integrity}`"
+                f"{provenance_basename} has expected integrity `{provenance.integrity}`, "
+                f"but the actual value is `{actual_integrity}`."
             )
 
         provenance_path = os.path.join(tmp_dir, provenance_basename)

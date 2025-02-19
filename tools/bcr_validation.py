@@ -239,7 +239,7 @@ class BcrValidator:
         self._slsa_verifier_path = self._get_slsa_verifier_path()
 
     def _get_slsa_verifier_path(self):
-        return Path(tempfile.mkdtemp() / f"basename{self._get_binary_extension()}")
+        return Path(tempfile.mkdtemp() / f"slsa-verifier{self._get_binary_extension()}")
 
     def _get_binary_extension(self):
         return ".exe" if platform.system().lower() == "windows" else ""
@@ -808,8 +808,9 @@ class BcrValidator:
         if dest.exists():
             return dest
 
-        raw_content = download(self._get_slsa_verifier_url())
-        self._check_slsa_verifier_sha256sum(raw_content, os.path.basename(dest))
+        url = self._get_slsa_verifier_url()
+        raw_content = download(url)
+        self._check_slsa_verifier_sha256sum(raw_content, os.path.basename(url))
 
         with open(dest, "wb") as f:
             f.write(raw_content)

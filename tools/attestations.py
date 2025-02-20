@@ -8,7 +8,6 @@ class Error(Exception):
 
 
 _ATTESTATIONS_DOCS_URL = "https://github.com/bazelbuild/bazel-central-registry/blob/main/docs/attestations.md"
-_ACCEPTED_ATTESTATION_TYPES = frozenset(["TODO"])
 
 
 @dataclasses.dataclass(frozen=True)
@@ -18,20 +17,19 @@ class Provenance:
     artifact_url_or_path: str
 
 
-def get_provenance(module_name, version, attestations, previous_attestation_types, registry):
-    _assert_is_dict_with_keys(data, ["types", "attestations"])
+def get_provenance(module_name, version, attestations_json, previous_attestation_types, registry):
+    _assert_is_dict_with_keys(attestations_json, ["types", "attestations"])
 
-    valid_types = set(data.get("types", []))
+    valid_types = set(attestations_json.get("types", []))
     if not types:
         raise Error("Missing list of attestation types.")
 
-    invalid_types = valid_types.difference(_ACCEPTED_ATTESTATION_TYPES)
-    if invalid_types:
-        raise Error(f"Attestation types {invalid_types} are currently unsupported.")
-
+    # TODO: is this really a problem?
     removed_types = set(previous_attestation_types).difference(valid_types)
     if removed_types:
-        raise Error(f"")  # TODO
+        raise Error(
+            f"{module}@{version} supports fewer attestation types than its previous release (removed: {', '.join(removed_types)})"
+        )
 
     source_url = registry.get_source()["url"]
     url_prefix, _, archive_basename = source_url.rpartition("/")
@@ -42,7 +40,7 @@ def get_provenance(module_name, version, attestations, previous_attestation_type
         archive_basename: source_url,
     }
 
-    attestations = data.get("attestations")
+    attestations = attestations_json.get("attestations")
     _assert_is_dict_with_keys(attestations, list(full_locations.keys()))
 
     provenances = []

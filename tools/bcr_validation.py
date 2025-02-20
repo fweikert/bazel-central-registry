@@ -669,7 +669,7 @@ class BcrValidator:
         previous_attestation_types = latest_snapshot.attestations()["types"] if latest_snapshot else []
 
         try:
-            provenances, valid_types = attestations.get_provenance(
+            provenances, allowed_types = attestations.get_provenance(
                 module_name, version, attestations, previous_attestation_types, self.registry
             )
         except attestations.Error as ex:
@@ -697,7 +697,7 @@ class BcrValidator:
         tmp_dir = tempfile.mkdtemp()
         for p in provenances:
             try:
-                self._verifier.run(p, source_uri, version, valid_types, tmp_dir)
+                self._verifier.run(p, source_uri, version, allowed_types, tmp_dir)
             except attestations.Error as ex:
                 self.report(f"{module_name}@{version}: {ex}")
                 success = False

@@ -7,6 +7,7 @@ import platform
 import re
 import textwrap
 
+from enum import Enum
 from pathlib import Path
 
 from registry import download
@@ -26,6 +27,23 @@ _VSA_PUBLIC_KEY = textwrap.dedent(
     3Xkk3UrxvbQtoZzTmq0zIYq+4QQl0YBedSyy+XcwAMaUWTouTrB05WhYtg==
     -----END PUBLIC KEY-----"""
 )
+
+_PREDICATE_RE = re.compile(r"^https://slsa.dev/(provenance|verification_summary)/v\d+(\.\d+)?$")
+
+
+class PredicateType(Enum):
+    INVALID = 1
+    PROVENANCE = 2
+    VSA = 3
+
+
+def validate_predicate_type(value):
+    m = _PREDICATE_RE.match(value)
+    if not m:
+        return PredicateType.INVALID
+
+    return PredicateType.PROVENANCE if m.group(1) == "provenance" else PredicateType.VSA
+
 
 class Verifier:
 
@@ -72,16 +90,20 @@ class Verifier:
             )
 
         attestation_type = actual_types[0]
+        validated_type = validate_predicate_type(attestation_type)
+        if validated_type == PredicateType.INVALID:
+            raise attestations.Error(f"{attestation_type} is not a valid SLSA attestation.")
+
+        # TODO: check if attestation_type matches a globally defined allowlist?
+
         if attestation_type not in valid_types:
             raise attestations.Error(
                 f"{provenance_basename} contains a {attestation_type} attestation, "
                 f"but BCR only allows {', '.join(valid_types)}."
             )
 
-        # TODO: check if attestation_type matches a globally defined allowlist?
-
         cmd, args = self._get_args(
-            attestation_type, provenance_path, source_uri, source_tag, artifact_url_or_path, tmp_dir
+            validated_type, provenance_path, source_uri, source_tag, artifact_url_or_path, tmp_dir
         )
         result = subprocess.run(
             [slsa_verifier_path, cmd] + args,
@@ -151,9 +173,8 @@ class Verifier:
 
         return [parse(p, l) for p, l in enumerate(raw_content.split(b"\n"))]
 
-    def _get_args(self, attestation_type, provenance_path, source_uri, source_tag, artifact_url_or_path, tmp_dir):
-        # TODO: validate attestation type?
-        fname = "_get_vsa_args" if "verification_summary" in attestation_type else "_get_provenance_args"
+    def _get_args(self, validated_type, provenance_path, source_uri, source_tag, artifact_url_or_path, tmp_dir):
+        fname = "_get_vsa_args" if validated_type == PredicateType.VSA else "_get_provenance_args"
         return getattr(self, fname)(provenance_path, source_uri, source_tag, artifact_url_or_path, tmp_dir)
 
     def _get_provenance_args(self, provenance_path, source_uri, source_tag, artifact_url_or_path, tmp_dir):

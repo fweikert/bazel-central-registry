@@ -1,5 +1,6 @@
 import attestations
 import base64
+import collections
 import hashlib
 import json
 import os
@@ -63,7 +64,7 @@ class Verifier:
     def _get_binary_extension(self):
         return ".exe" if platform.system().lower() == "windows" else ""
 
-    def run(self, provenance, source_uri, source_tag, valid_types, tmp_dir):
+    def run(self, provenance, source_uri, source_tag, allowed_types, tmp_dir):
         self._download_if_necessary()
 
         provenance_basename = os.path.basename(provenance.url)
@@ -79,31 +80,11 @@ class Verifier:
         with open(provenance_path, "wb") as f:
             f.write(raw_provenance)
 
-        actual_types = self._get_attestation_types(provenance_basename, raw_provenance)
-        if not actual_types:
-            raise attestations.Error(f"{provenance_basename} does not contain valid attestations.")
-
-        if len(actual_types) > 1:
-            # TODO: figure out what to do here
-            raise attestations.Error(
-                f"{provenance_basename} must contain attestations of the same type, but contains {', '.join(actual_types)}."
-            )
-
-        attestation_type = actual_types[0]
-        validated_type = validate_predicate_type(attestation_type)
-        if validated_type == PredicateType.INVALID:
-            raise attestations.Error(f"{attestation_type} is not a valid SLSA attestation.")
-
-        # TODO: check if attestation_type matches a globally defined allowlist?
-
-        if attestation_type not in valid_types:
-            raise attestations.Error(
-                f"{provenance_basename} contains a {attestation_type} attestation, "
-                f"but BCR only allows {', '.join(valid_types)}."
-            )
+        actual_types = self._read_attestation_types(provenance_basename, raw_provenance)
+        predicate_type = self._evaluate_attestation_types(provenance_basename, actual_types, allowed_types)
 
         cmd, args = self._get_args(
-            validated_type, provenance_path, source_uri, source_tag, artifact_url_or_path, tmp_dir
+            predicate_type, provenance_path, source_uri, source_tag, artifact_url_or_path, tmp_dir
         )
         result = subprocess.run(
             [slsa_verifier_path, cmd] + args,
@@ -160,7 +141,7 @@ class Verifier:
             f"{binary_name}@{self._version}: " f"could not find actual checksum {actual_hash} in {self._SHA256SUM_URL}."
         )
 
-    def _get_attestation_types(self, provenance_basename, raw_provenance):
+    def _read_attestation_types(self, provenance_basename, raw_provenance):
 
         def parse(pos, line):
             try:
@@ -172,6 +153,39 @@ class Verifier:
                 raise Error(f"Error in {provenance_basename}:{pos}: {ex}.") from ex
 
         return [parse(p, l) for p, l in enumerate(raw_content.split(b"\n"))]
+
+    def _evaluate_attestation_types(self, provenance_basename, actual_types, allowed_types):
+        if not actual_types:
+            raise attestations.Error(f"{provenance_basename} does not contain any attestations.")
+
+        by_type = self._partition(actual_types)
+        invalid = by_type.get(PredicateType.INVALID)
+        if invalid:
+            raise attestations.Error(
+                f"{provenance_basename} contains invalid attestation type(s): {', '.join(invalid)}."
+            )
+
+        # TODO: check if attestation_type matches a globally defined allowlist?
+
+        disallowed = set(actual_types).difference(allowed_types)
+        if disallowed:
+            raise attestations.Error(
+                f"{provenance_basename} contains the following attestation type(s) "
+                f"not listed in its attestations.json: {', '.join(disallowed)}."
+            )
+
+        if len(by_type) > 1:
+            raise attestations.Error(f"{provenance_basename} must contain either SLSA provenances or VSAs, not both.")
+
+        # TODO: which one to return if there are multiple?
+        return list(by_type.keys())[0]
+
+    def _partition(self, attestation_types):
+        result = collections.defaultdict(set)
+        for at in attestation_types:
+            result[validate_predicate_type(at)].add(at)
+
+        return result
 
     def _get_args(self, validated_type, provenance_path, source_uri, source_tag, artifact_url_or_path, tmp_dir):
         fname = "_get_vsa_args" if validated_type == PredicateType.VSA else "_get_provenance_args"

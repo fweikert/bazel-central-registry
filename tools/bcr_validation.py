@@ -658,20 +658,26 @@ class BcrValidator:
             self.report(BcrValidationResult.GOOD, "All metadata.json files are valid.")
 
     def verify_attestations(self, module_name, version):
+        head_snapshot = self.upstream.get_latest_module_version(module_name)
+        head_attestations = latest_snapshot.attestations() if head_snapshot else None
+
         attestations = self.registry.get_attestations(module_name, version)
         if not attestations:
-            # TODO: turn this into a warning?
-            self.report(BcrValidationResult.GOOD, "No attestations to check.")
+            if head_attestations:
+                self.report(
+                    BcrValidationResult.FAILED,
+                    f"{module_name}@{version}: No attestations.json file even though {module_name}@{head_snapshot.version} has one.",
+                )
+            else:
+                # TODO: Turn this into an error after the migration period
+                self.report(BcrValidationResult.GOOD, f"No attestations to check.")
+
             return
 
-        # Compare to previous attestations
-        latest_snapshot = self.upstream.get_latest_module_version(module_name)
-        previous_attestations = latest_snapshot.attestations() if latest_snapshot else None
-        previous_attestation_types = previous_attestations.get("types") if previous_attestations else []
-
+        head_attestation_types = head_attestations.get("types") if head_attestations else []
         try:
             provenances, allowed_types = attestations.get_provenance(
-                module_name, version, attestations, previous_attestation_types, self.registry
+                module_name, version, attestations, head_attestation_types, self.registry
             )
         except attestations.Error as ex:
             self.report(

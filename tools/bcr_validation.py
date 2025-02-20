@@ -666,11 +666,12 @@ class BcrValidator:
             if head_attestations:
                 self.report(
                     BcrValidationResult.FAILED,
-                    f"{module_name}@{version}: No attestations.json file even though {module_name}@{head_snapshot.version} has one.",
+                    f"{module_name}@{version}: No attestations.json file even though "
+                    f"{module_name}@{head_snapshot.version} has one.",
                 )
             else:
                 # TODO: Turn this into an error after the migration period
-                self.report(BcrValidationResult.GOOD, f"No attestations to check.")
+                self.report(BcrValidationResult.GOOD, f"{module_name}@{version}: No attestations to check.")
 
             return
 

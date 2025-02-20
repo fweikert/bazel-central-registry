@@ -108,6 +108,11 @@ def integrity(data, algorithm="sha256"):
     return f"{algorithm}-{encoded}"
 
 
+def integrity_for_comparison(data, expected_integrity):
+    algorithm, _ = expected_integrity.split("-", 1)
+    return integrity(data, algorithm)
+
+
 def json_dump(file, data, sort_keys=True):
     with open(file, "w", newline="\n") as f:
         json.dump(data, f, indent=4, sort_keys=sort_keys)

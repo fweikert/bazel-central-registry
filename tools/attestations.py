@@ -21,15 +21,15 @@ class Provenance:
 def get_provenance(module_name, version, attestations, previous_attestation_types, registry):
     _assert_is_dict_with_keys(data, ["types", "attestations"])
 
-    types = data.get("types")
+    valid_types = set(data.get("types", []))
     if not types:
         raise Error("Missing list of attestation types.")
 
-    invalid_types = set(types).difference(_ACCEPTED_ATTESTATION_TYPES)
+    invalid_types = valid_types.difference(_ACCEPTED_ATTESTATION_TYPES)
     if invalid_types:
         raise Error(f"Attestation types {invalid_types} are currently unsupported.")
 
-    removed_types = set(previous_attestation_types).difference(types)
+    removed_types = set(previous_attestation_types).difference(valid_types)
     if removed_types:
         raise Error(f"")  # TODO
 
@@ -66,7 +66,7 @@ def get_provenance(module_name, version, attestations, previous_attestation_type
             )
         )
 
-    return provenances
+    return provenances, valid_types
 
 
 def _assert_is_dict_with_keys(self, candidate, keys):

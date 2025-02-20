@@ -666,7 +666,8 @@ class BcrValidator:
 
         # Compare to previous attestations
         latest_snapshot = self.upstream.get_latest_module_version(module_name)
-        previous_attestation_types = latest_snapshot.attestations()["types"] if latest_snapshot else []
+        previous_attestations = latest_snapshot.attestations() if latest_snapshot else None
+        previous_attestation_types = previous_attestations.get("types") if previous_attestations else []
 
         try:
             provenances, allowed_types = attestations.get_provenance(

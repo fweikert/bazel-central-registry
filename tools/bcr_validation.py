@@ -675,7 +675,7 @@ class BcrValidator:
             return
 
         try:
-            attestations = attestations_lib.parse_file(module_name, version, attestations_json, self.registry)
+            attestations = attestations_lib.parse_file(attestations_json, module_name, version, self.registry)
         except attestations_lib.Error as ex:
             self.report(
                 BcrValidationResult.FAILED,

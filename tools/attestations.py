@@ -17,7 +17,7 @@ class Attestation:
     artifact_url_or_path: str
 
 
-def parse_file(module_name, version, attestations_json, registry):
+def parse_file(attestations_json, module_name, version, registry):
     _assert_is_dict_with_keys(attestations_json, ["mediaType", "attestations"])
 
     mediaType = attestations_json.get("mediaType")

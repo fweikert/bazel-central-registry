@@ -30,11 +30,8 @@ Validations performed are:
 
 import argparse
 import ast
-import dataclasses
-import hashlib
 import json
 import os
-import platform
 import re
 import requests
 import shutil
@@ -48,7 +45,7 @@ from enum import Enum
 from pathlib import Path
 from urllib.parse import urlparse
 
-import attestations
+import attestations as attestations_lib
 import slsa
 
 from registry import RegistryClient
@@ -661,11 +658,11 @@ class BcrValidator:
 
     def verify_attestations(self, module_name, version):
         head_snapshot = self.upstream.get_latest_module_version(module_name)
-        head_attestations = head_snapshot.attestations() if head_snapshot else None
+        head_attestations_json = head_snapshot.attestations() if head_snapshot else None
 
-        attestations = self.registry.get_attestations(module_name, version)
-        if not attestations:
-            if head_attestations:
+        attestations_json = self.registry.get_attestations(module_name, version)
+        if not attestations_json:
+            if head_attestations_json:  # Prevent regressions.
                 self.report(
                     BcrValidationResult.FAILED,
                     f"{module_name}@{version}: No attestations.json file even though "
@@ -678,8 +675,8 @@ class BcrValidator:
             return
 
         try:
-            provenances = attestations.get_provenance(module_name, version, attestations, self.registry)
-        except attestations.Error as ex:
+            attestations = attestations_lib.parse_file(module_name, version, attestations_json, self.registry)
+        except attestations_lib.Error as ex:
             self.report(
                 BcrValidationResult.FAILED,
                 (
@@ -689,7 +686,7 @@ class BcrValidator:
             )
             return
 
-        source_uri = self.get_source_uri(module_name, version)
+        source_uri = self.get_source_uri(module_name)
         if not source_uri:
             self.report(
                 BcrValidationResult.FAILED,
@@ -702,10 +699,10 @@ class BcrValidator:
 
         success = True
         tmp_dir = tempfile.mkdtemp()
-        for p in provenances:
+        for attestation in attestations:
             try:
-                self._verifier.run(p, source_uri, version, tmp_dir)
-            except attestations.Error as ex:
+                self._verifier.run(attestation, source_uri, version, tmp_dir)
+            except attestations_lib.Error as ex:
                 self.report(f"{module_name}@{version}: {ex}")
                 success = False
 
@@ -715,7 +712,7 @@ class BcrValidator:
                 f"Successfully verified attestations for {module_name}@{version}.",
             )
 
-    def get_source_uri(self, module_name, version):
+    def get_source_uri(self, module_name):
         repos = self.registry.get_metadata(module_name)["repository"]
         if len(repos) != 1:
             return None

@@ -1,4 +1,4 @@
-import attestations
+import attestations as attestations_lib
 import base64
 import collections
 import hashlib
@@ -66,27 +66,32 @@ class Verifier:
     def _get_binary_extension(self):
         return ".exe" if platform.system().lower() == "windows" else ""
 
-    def run(self, provenance, source_uri, source_tag, tmp_dir):
+    def run(self, attestation, source_uri, source_tag, tmp_dir):
         self._download_if_necessary()
 
-        provenance_basename = os.path.basename(provenance.url)
-        raw_provenance = download(provenance.url)
-        actual_integrity = integrity_for_comparison(raw_provenance, provenance.integrity)
-        if actual_integrity != provenance.integrity:
-            raise attestations.Error(
-                f"{provenance_basename} has expected integrity `{provenance.integrity}`, "
+        attestation_basename = os.path.basename(attestation.url)
+        raw_attestation = download(attestation.url)
+        actual_integrity = integrity_for_comparison(raw_attestation, attestation.integrity)
+        if actual_integrity != attestation.integrity:
+            raise attestations_lib.Error(
+                f"{attestation_basename} has expected integrity `{attestation.integrity}`, "
                 f"but the actual value is `{actual_integrity}`."
             )
 
-        provenance_path = os.path.join(tmp_dir, provenance_basename)
-        with open(provenance_path, "wb") as f:
-            f.write(raw_provenance)
+        attestation_path = os.path.join(tmp_dir, attestation_basename)
+        with open(attestation_path, "wb") as f:
+            f.write(raw_attestation)
 
-        actual_types = self._read_attestation_types(provenance_basename, raw_provenance)
-        predicate_type = self._evaluate_attestation_types(provenance_basename, actual_types)
+        actual_types = self._read_attestation_types(attestation_basename, raw_attestation)
+        predicate_type = self._evaluate_attestation_types(attestation_basename, actual_types)
 
         cmd, args = self._get_args(
-            predicate_type, provenance_path, source_uri, source_tag, provenance.artifact_url_or_path, tmp_dir
+            predicate_type,
+            attestation_path,
+            source_uri,
+            source_tag,
+            attestation_path.artifact_url_or_path,
+            tmp_dir,
         )
         result = subprocess.run(
             [self._executable, cmd] + args,
@@ -95,7 +100,7 @@ class Verifier:
         )
 
         if result.returncode:
-            raise attestations.Error(
+            raise attestations_lib.Error(
                 "\n".join(
                     "SLSA verifier failed:",
                     "Command:",
@@ -139,11 +144,11 @@ class Verifier:
                     return
                 break
 
-        raise attestations.Error(
+        raise attestations_lib.Error(
             f"{binary_name}@{self._version}: " f"could not find actual checksum {actual_hash} in {self._SHA256SUM_URL}."
         )
 
-    def _read_attestation_types(self, provenance_basename, raw_provenance):
+    def _read_attestation_types(self, basename, raw_attestation):
 
         def parse(pos, line):
             try:
@@ -152,25 +157,23 @@ class Verifier:
                 payload = json.loads(base64.b64decode(raw_payload))
                 return payload.get("predicateType")
             except Exception as ex:
-                raise attestations.Error(f"Error in {provenance_basename}:{pos}: {ex}.") from ex
+                raise attestations_lib.Error(f"Error in {basename}:{pos}: {ex}.") from ex
 
-        return [parse(p, l) for p, l in enumerate(raw_provenance.split(b"\n"))]
+        return [parse(p, l) for p, l in enumerate(raw_attestation.split(b"\n"))]
 
-    def _evaluate_attestation_types(self, provenance_basename, actual_types):
+    def _evaluate_attestation_types(self, basename, actual_types):
         if not actual_types:
-            raise attestations.Error(f"{provenance_basename} does not contain any attestations.")
+            raise attestations_lib.Error(f"{basename} does not contain any attestations_lib.")
 
         by_type = self._partition(actual_types)
         invalid = by_type.get(PredicateType.INVALID)
         if invalid:
-            raise attestations.Error(
-                f"{provenance_basename} contains invalid attestation type(s): {', '.join(invalid)}."
-            )
+            raise attestations_lib.Error(f"{basename} contains invalid attestation type(s): {', '.join(invalid)}.")
 
         # TODO: check if attestation_type matches a globally defined allowlist?
 
         if len(by_type) > 1:
-            raise attestations.Error(f"{provenance_basename} must contain either SLSA provenances or VSAs, not both.")
+            raise attestations_lib.Error(f"{basename} must contain either SLSA provenances or VSAs, not both.")
 
         # TODO: which one to return if there are multiple?
         return list(by_type.keys())[0]
@@ -182,9 +185,9 @@ class Verifier:
 
         return result
 
-    def _get_args(self, validated_type, provenance_path, source_uri, source_tag, artifact_url_or_path, tmp_dir):
+    def _get_args(self, validated_type, attestation_path, source_uri, source_tag, artifact_url_or_path, tmp_dir):
         fname = "_get_vsa_args" if validated_type == PredicateType.VSA else "_get_provenance_args"
-        return getattr(self, fname)(provenance_path, source_uri, source_tag, artifact_url_or_path, tmp_dir)
+        return getattr(self, fname)(attestation_path, source_uri, source_tag, artifact_url_or_path, tmp_dir)
 
     def _get_provenance_args(self, provenance_path, source_uri, source_tag, artifact_url_or_path, tmp_dir):
         artifact_path = self._download_artifact_if_required(artifact_url_or_path, tmp_dir)
@@ -207,14 +210,14 @@ class Verifier:
         download_file(url_or_path, dest)
         return dest
 
-    def _get_vsa_args(self, provenance_path, source_uri, source_tag, artifact_url_or_path, tmp_dir):
+    def _get_vsa_args(self, attestation_path, source_uri, source_tag, artifact_url_or_path, tmp_dir):
         self._ensure_vsa_key_exists()
         artifact_digest = hashlib.sha256(self._read_url_or_file(artifact_url_or_path)).hexdigest()
         args = [
             "--subject-digest",
             artifact_digest,
             "--attestation-path",
-            provenance_path,
+            attestation_path,
             "--verifier-id",
             _VSA_VERIFIER_ID,
             "--resource-uri",

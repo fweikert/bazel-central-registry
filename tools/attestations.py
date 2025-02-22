@@ -11,13 +11,13 @@ _VALID_MEDIA_TYPES = frozenset(["application/vnd.build.bazel.registry.attestatio
 
 
 @dataclasses.dataclass(frozen=True)
-class Provenance:
+class Attestation:
     url: str
     integrity: str
     artifact_url_or_path: str
 
 
-def get_provenance(module_name, version, attestations_json, registry):
+def parse_file(module_name, version, attestations_json, registry):
     _assert_is_dict_with_keys(attestations_json, ["mediaType", "attestations"])
 
     mediaType = attestations_json.get("mediaType")
@@ -33,11 +33,11 @@ def get_provenance(module_name, version, attestations_json, registry):
         archive_basename: source_url,
     }
 
-    attestations = attestations_json.get("attestations")
-    _assert_is_dict_with_keys(attestations, list(full_locations.keys()))
+    attestations_metadata = attestations_json.get("attestations")
+    _assert_is_dict_with_keys(attestations_metadata, list(full_locations.keys()))
 
-    provenances = []
-    for basename, metadata in attestations.items():
+    attestations = []
+    for basename, metadata in attestations_metadata.items():
         _assert_is_dict_with_keys(metadata, ["url", "integrity"])
 
         expected_url = f"{url_prefix}/{basename}.intoto.jsonl"
@@ -49,15 +49,15 @@ def get_provenance(module_name, version, attestations_json, registry):
         if not integrity:
             raise Error(f"Missing `integrity` field for {basename} attestation.")
 
-        provenances.append(
-            Provenance(
+        attestations.append(
+            Attestation(
                 url=url,
                 integrity=integrity,
                 artifact_url_or_path=full_locations[basename],
             )
         )
 
-    return provenances
+    return attestations
 
 
 def _assert_is_dict_with_keys(self, candidate, keys):

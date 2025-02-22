@@ -163,7 +163,7 @@ class Verifier:
 
     def _evaluate_attestation_types(self, basename, actual_types):
         if not actual_types:
-            raise attestations_lib.Error(f"{basename} does not contain any attestations_lib.")
+            raise attestations_lib.Error(f"{basename} does not contain any attestations.")
 
         by_type = self._partition(actual_types)
         invalid = by_type.get(PredicateType.INVALID)

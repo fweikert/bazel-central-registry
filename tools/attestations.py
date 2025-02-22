@@ -7,7 +7,7 @@ class Error(Exception):
     """
 
 
-_ATTESTATIONS_DOCS_URL = "https://github.com/bazelbuild/bazel-central-registry/blob/main/docs/attestations.md"
+_VALID_MEDIA_TYPES = frozenset(["application/vnd.build.bazel.registry.attestation+json;version=1.0.0"])
 
 
 @dataclasses.dataclass(frozen=True)
@@ -17,19 +17,12 @@ class Provenance:
     artifact_url_or_path: str
 
 
-def get_provenance(module_name, version, attestations_json, previous_attestation_types, registry):
-    _assert_is_dict_with_keys(attestations_json, ["types", "attestations"])
+def get_provenance(module_name, version, attestations_json, registry):
+    _assert_is_dict_with_keys(attestations_json, ["mediaType", "attestations"])
 
-    valid_types = set(attestations_json.get("types", []))
-    if not types:
-        raise Error("Missing list of attestation types.")
-
-    # TODO: is this really a problem?
-    removed_types = set(previous_attestation_types).difference(valid_types)
-    if removed_types:
-        raise Error(
-            f"{module}@{version} supports fewer attestation types than its previous release (removed: {', '.join(removed_types)})"
-        )
+    mediaType = attestations_json.get("mediaType")
+    if mediaType not in _VALID_MEDIA_TYPES:
+        raise Error(f"Invalid media type '{mediaType}'")
 
     source_url = registry.get_source()["url"]
     url_prefix, _, archive_basename = source_url.rpartition("/")
@@ -64,7 +57,7 @@ def get_provenance(module_name, version, attestations_json, previous_attestation
             )
         )
 
-    return provenances, valid_types
+    return provenances
 
 
 def _assert_is_dict_with_keys(self, candidate, keys):

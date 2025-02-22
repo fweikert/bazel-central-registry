@@ -81,6 +81,8 @@ COLOR = {
 
 DEFAULT_SLSA_VERIFIER_VERSION = "v2.7.0"
 
+ATTESTATIONS_DOCS_URL = "https://github.com/bazelbuild/bazel-central-registry/blob/main/docs/attestations.md"
+
 GITHUB_REPO_RE = re.compile(r"^(https://github.com/|github:)([^/]+/[^/]+)$")
 
 
@@ -659,7 +661,7 @@ class BcrValidator:
 
     def verify_attestations(self, module_name, version):
         head_snapshot = self.upstream.get_latest_module_version(module_name)
-        head_attestations = latest_snapshot.attestations() if head_snapshot else None
+        head_attestations = head_snapshot.attestations() if head_snapshot else None
 
         attestations = self.registry.get_attestations(module_name, version)
         if not attestations:
@@ -675,11 +677,8 @@ class BcrValidator:
 
             return
 
-        head_attestation_types = head_attestations.get("types") if head_attestations else []
         try:
-            provenances, allowed_types = attestations.get_provenance(
-                module_name, version, attestations, head_attestation_types, self.registry
-            )
+            provenances = attestations.get_provenance(module_name, version, attestations, self.registry)
         except attestations.Error as ex:
             self.report(
                 BcrValidationResult.FAILED,
@@ -705,7 +704,7 @@ class BcrValidator:
         tmp_dir = tempfile.mkdtemp()
         for p in provenances:
             try:
-                self._verifier.run(p, source_uri, version, allowed_types, tmp_dir)
+                self._verifier.run(p, source_uri, version, tmp_dir)
             except attestations.Error as ex:
                 self.report(f"{module_name}@{version}: {ex}")
                 success = False

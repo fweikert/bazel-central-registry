@@ -6,12 +6,14 @@ import json
 import os
 import platform
 import re
+import subprocess
 import textwrap
 
 from enum import Enum
 from pathlib import Path
 
 from registry import download
+from registry import download_file
 from registry import integrity_for_comparison
 
 
@@ -64,7 +66,7 @@ class Verifier:
     def _get_binary_extension(self):
         return ".exe" if platform.system().lower() == "windows" else ""
 
-    def run(self, provenance, source_uri, source_tag, allowed_types, tmp_dir):
+    def run(self, provenance, source_uri, source_tag, tmp_dir):
         self._download_if_necessary()
 
         provenance_basename = os.path.basename(provenance.url)
@@ -81,13 +83,13 @@ class Verifier:
             f.write(raw_provenance)
 
         actual_types = self._read_attestation_types(provenance_basename, raw_provenance)
-        predicate_type = self._evaluate_attestation_types(provenance_basename, actual_types, allowed_types)
+        predicate_type = self._evaluate_attestation_types(provenance_basename, actual_types)
 
         cmd, args = self._get_args(
-            predicate_type, provenance_path, source_uri, source_tag, artifact_url_or_path, tmp_dir
+            predicate_type, provenance_path, source_uri, source_tag, provenance.artifact_url_or_path, tmp_dir
         )
         result = subprocess.run(
-            [slsa_verifier_path, cmd] + args,
+            [self._executable, cmd] + args,
             capture_output=True,
             encoding="utf-8",
         )
@@ -150,11 +152,11 @@ class Verifier:
                 payload = json.loads(base64.b64decode(raw_payload))
                 return payload.get("predicateType")
             except Exception as ex:
-                raise Error(f"Error in {provenance_basename}:{pos}: {ex}.") from ex
+                raise attestations.Error(f"Error in {provenance_basename}:{pos}: {ex}.") from ex
 
-        return [parse(p, l) for p, l in enumerate(raw_content.split(b"\n"))]
+        return [parse(p, l) for p, l in enumerate(raw_provenance.split(b"\n"))]
 
-    def _evaluate_attestation_types(self, provenance_basename, actual_types, allowed_types):
+    def _evaluate_attestation_types(self, provenance_basename, actual_types):
         if not actual_types:
             raise attestations.Error(f"{provenance_basename} does not contain any attestations.")
 
@@ -166,13 +168,6 @@ class Verifier:
             )
 
         # TODO: check if attestation_type matches a globally defined allowlist?
-
-        disallowed = set(actual_types).difference(allowed_types)
-        if disallowed:
-            raise attestations.Error(
-                f"{provenance_basename} contains the following attestation type(s) "
-                f"not listed in its attestations.json: {', '.join(disallowed)}."
-            )
 
         if len(by_type) > 1:
             raise attestations.Error(f"{provenance_basename} must contain either SLSA provenances or VSAs, not both.")

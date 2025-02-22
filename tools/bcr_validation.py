@@ -25,7 +25,7 @@ Validations performed are:
   - Verify if the presubmit.yml file matches the previous version
     - If not, we should require BCR maintainer review.
   - Verify the checked in MODULE.bazel file matches the one in the extracted and patched source tree.
-  - Verify provenance referenced by attestations.json (if it exists).
+  - Verify attestations (SLSA provenance / VSA) referenced by attestations.json (if it exists).
 """
 
 import argparse

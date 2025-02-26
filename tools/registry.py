@@ -554,7 +554,7 @@ class UpstreamRegistry:
         if not content:
             return None
 
-        metadata = json.loads(metadata.json)
+        metadata = json.loads(content)
         latest_version = metadata["versions"][-1]  # Presubmit ensures asc. order
         module_root_url = posixpath.join(self._root_url, module_name, latest_version)
         return ModuleSnapshot(latest_version, module_root_url)

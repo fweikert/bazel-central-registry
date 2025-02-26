@@ -18,7 +18,7 @@ from registry import integrity_for_comparison
 
 
 # TODO: Read these settings from a config file
-_VSA_VERIFIER_ID = ("https://bcid.corp.google.com/verifier/bcid_package_enforcer/v0.1",)
+_VSA_VERIFIER_ID = "https://bcid.corp.google.com/verifier/bcid_package_enforcer/v0.1"
 _VSA_VERIFIED_LEVEL = "SLSA_BUILD_LEVEL_2"
 _VSA_KEY_ID = "keystore://76574:prod:vsa_signing_public_key"
 
@@ -67,7 +67,7 @@ class Verifier:
         return ".exe" if platform.system().lower() == "windows" else ""
 
     def run(self, attestation, source_uri, source_tag, tmp_dir):
-        self._download_if_necessary()
+        self._download_binary_if_necessary()
 
         attestation_basename = os.path.basename(attestation.url)
         raw_attestation = download(attestation.url)
@@ -111,7 +111,7 @@ class Verifier:
             )
         # TODO: --builder-id, check blessed GHA action?
 
-    def _download_if_necessary(self):
+    def _download_binary_if_necessary(self):
         if self._executable.exists():
             return
 

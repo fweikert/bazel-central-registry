@@ -572,7 +572,11 @@ class ModuleSnapshot:
         return _download_if_exists(posixpath.join(self._root_url, filename))
 
     def presubmit(self):
-        return self._download_if_exists(PRESUBMIT_YML)
+        raw = self._download_if_exists(PRESUBMIT_YML)
+        if not raw:
+            return None
+
+        return raw.decode("utf-8")
 
     def attestations(self):
         raw = self._download_if_exists("attestations.json")

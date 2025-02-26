@@ -24,7 +24,7 @@ def parse_file(attestations_json, module_name, version, registry):
     if mediaType not in _VALID_MEDIA_TYPES:
         raise Error(f"Invalid media type '{mediaType}'")
 
-    source_url = registry.get_source()["url"]
+    source_url = registry.get_source(module_name, version)["url"]
     url_prefix, _, archive_basename = source_url.rpartition("/")
 
     full_locations = {

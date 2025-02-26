@@ -576,7 +576,7 @@ class ModuleSnapshot:
         if not raw:
             return None
 
-        return raw.decode("utf-8").split("\n")
+        return raw.decode("utf-8").splitlines(keepends=True)
 
     def attestations(self):
         raw = self._download_if_exists("attestations.json")

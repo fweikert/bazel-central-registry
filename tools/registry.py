@@ -548,7 +548,7 @@ class UpstreamRegistry:
     def __init__(self, org="bazelbuild", repo="bazel-central-registry", branch="main"):
         self._root_url = f"https://raw.githubusercontent.com/{org}/{repo}/refs/heads/{branch}/modules"
 
-    def get_latest_module_version(module_name):
+    def get_latest_module_version(self, module_name):
         metadata_url = posixpath.join(self._root_url, module_name, "metadata.json")
         content = _download_if_exists(metadata_url)
         if not content:
@@ -562,17 +562,17 @@ class UpstreamRegistry:
 
 class ModuleSnapshot:
 
-    def __init__(version, root_url):
+    def __init__(self, version, root_url):
         self.version = version
         self._root_url = root_url
-        
-    def _download_if_exists(filename):
+
+    def _download_if_exists(self, filename):
         return _download_if_exists(posixpath.join(self._root_url, filename))
 
-    def presubmit():
+    def presubmit(self):
         return self._download_if_exists("presubmit.yaml")
-  
-    def attestations():
+
+    def attestations(self):
         raw = self._download_if_exists("attestations.json")
         if raw:
             return json.loads(raw)

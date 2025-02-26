@@ -704,7 +704,7 @@ class BcrValidator:
             try:
                 self._verifier.run(attestation, source_uri, version, tmp_dir)
             except attestations_lib.Error as ex:
-                self.report(f"{module_name}@{version}: {ex}")
+                self.report(BcrValidationResult.FAILED, f"{module_name}@{version}: {ex}")
                 success = False
 
         if success:

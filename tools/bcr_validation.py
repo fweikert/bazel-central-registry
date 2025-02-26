@@ -49,6 +49,7 @@ import attestations as attestations_lib
 import slsa
 
 from registry import RegistryClient
+from registry import UpstreamRegistry
 from registry import Version
 from registry import download
 from registry import download_file
@@ -800,7 +801,7 @@ def main(argv=None):
             print(f"{name}@{version}")
 
     # TODO: Read org etc from flags to support forks.
-    upstream = registry.UpstreamRegistry()
+    upstream = UpstreamRegistry()
 
     # Validate given module version.
     validator = BcrValidator(registry, upstream, args.fix)

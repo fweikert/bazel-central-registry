@@ -61,7 +61,11 @@ def parse_file(attestations_json, module_name, version, registry):
 
 
 def _assert_is_dict_with_keys(candidate, keys):
+
+    def format(k):
+        return ", ".join(k)
+
     if not isinstance(candidate, dict):
         raise Error("Expected a dictionary.")
     if set(keys).symmetric_difference(candidate.keys()):
-        raise Error(f"Expected keys {keys}, but got {candidate.keys()}.")
+        raise Error(f"Expected keys {format(keys)}, but got {format(candidate.keys())}.")

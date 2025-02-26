@@ -1,0 +1,4 @@
+module(
+    name = "bcr-module-provenance",
+    version = "1.0",
+)

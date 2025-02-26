@@ -60,7 +60,7 @@ def parse_file(attestations_json, module_name, version, registry):
     return attestations
 
 
-def _assert_is_dict_with_keys(self, candidate, keys):
+def _assert_is_dict_with_keys(candidate, keys):
     if not isinstance(candidate, dict):
         raise Error("Expected a dictionary.")
     if set(keys).symmetric_difference(candidate.keys()):

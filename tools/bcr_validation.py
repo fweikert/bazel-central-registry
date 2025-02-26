@@ -374,7 +374,7 @@ class BcrValidator:
                 "should be reviewed by a BCR maintainer.",
             )
         else:
-            previous_presubmit_content = latest_snapshot.presubmit()
+            previous_presubmit_content = latest_snapshot.presubmit_yml_lines()
             current_presubmit_yml = self.registry.get_presubmit_yml_path(module_name, version)
             current_presubmit_content = open(current_presubmit_yml, "r").readlines()
             diff = list(

@@ -571,12 +571,12 @@ class ModuleSnapshot:
     def _download_if_exists(self, filename):
         return _download_if_exists(posixpath.join(self._root_url, filename))
 
-    def presubmit(self):
+    def presubmit_yml_lines(self):
         raw = self._download_if_exists(PRESUBMIT_YML)
         if not raw:
             return None
 
-        return raw.decode("utf-8")
+        return raw.decode("utf-8").split("\n")
 
     def attestations(self):
         raw = self._download_if_exists("attestations.json")

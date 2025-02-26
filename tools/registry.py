@@ -37,6 +37,8 @@ from urllib.error import HTTPError
 GREEN = "\x1b[32m"
 RESET = "\x1b[0m"
 
+PRESUBMIT_YML = "presubmit.yml"
+
 
 def log(msg):
     print(f"{GREEN}INFO: {RESET}{msg}")
@@ -298,7 +300,7 @@ module(
         return self.get_version_dir(module_name, version) / "source.json"
 
     def get_presubmit_yml_path(self, module_name, version):
-        return self.get_version_dir(module_name, version) / "presubmit.yml"
+        return self.get_version_dir(module_name, version) / PRESUBMIT_YML
 
     def get_patch_file_path(self, module_name, version, patch_name):
         return self.get_version_dir(module_name, version) / "patches" / patch_name
@@ -310,7 +312,7 @@ module(
         path = self.get_version_dir(module_name, version) / "attestations.json"
         if not path.exists():
             return None
-        
+
         return json.loads(path.read_text())
 
     def contains(self, module_name, version=None):
@@ -424,7 +426,7 @@ module(
         json_dump(p.joinpath("source.json"), source, sort_keys=False)
 
         # Create presubmit.yml file
-        presubmit_yml = p.joinpath("presubmit.yml")
+        presubmit_yml = p.joinpath(PRESUBMIT_YML)
         if module.presubmit_yml:
             shutil.copy(module.presubmit_yml, presubmit_yml)
         else:
@@ -570,7 +572,7 @@ class ModuleSnapshot:
         return _download_if_exists(posixpath.join(self._root_url, filename))
 
     def presubmit(self):
-        return self._download_if_exists("presubmit.yaml")
+        return self._download_if_exists(PRESUBMIT_YML)
 
     def attestations(self):
         raw = self._download_if_exists("attestations.json")

@@ -682,7 +682,7 @@ class BcrValidator:
                 BcrValidationResult.FAILED,
                 (
                     f"{module_name}@{version}: Encountered an error in attestations.json:"
-                    " {ex} Please follow {ATTESTATIONS_DOCS_URL}."
+                    f" {ex} Please follow {ATTESTATIONS_DOCS_URL}."
                 ),
             )
             return

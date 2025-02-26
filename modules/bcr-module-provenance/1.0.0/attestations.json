@@ -9,7 +9,7 @@
       "url": "https://github.com/loosebazooka/bcr-module-provenance/releases/download/v1.0.0/MODULE.bazel.intoto.jsonl",
       "integrity": "sha256-982H8Gs8pi1GXdo0G5mO65i8JtE9D64qXEhd3Gn0R2A="
     },
-    "bcr-module-provenance-v1.0.0.tar.gz.intoto.jsonl": {
+    "bcr-module-provenance-v1.0.0.tar.gz": {
       "url": "https://github.com/loosebazooka/bcr-module-provenance/releases/download/v1.0.0/bcr-module-provenance-v1.0.0.tar.gz.intoto.jsonl",
       "integrity": "sha256-cCjsorjzir366ZGGUeqIHlN0kPMSSTG1imMofJRPoZ4="
     }

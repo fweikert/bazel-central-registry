@@ -90,7 +90,7 @@ class Verifier:
             attestation_path,
             source_uri,
             source_tag,
-            attestation_path.artifact_url_or_path,
+            attestation.artifact_url_or_path,
             tmp_dir,
         )
         result = subprocess.run(
@@ -102,11 +102,13 @@ class Verifier:
         if result.returncode:
             raise attestations_lib.Error(
                 "\n".join(
-                    "SLSA verifier failed:",
-                    "Command:",
-                    self._pretty_print(cmd, args),
-                    "Output:",
-                    f"\t{result.stderr}",
+                    [
+                        f"SLSA verifier failed for {attestation_basename}:",
+                        "Command:",
+                        self._pretty_print(cmd, args),
+                        "Output:",
+                        f"\t{result.stderr}",
+                    ]
                 )
             )
         # TODO: --builder-id, check blessed GHA action?
@@ -157,9 +159,11 @@ class Verifier:
                 payload = json.loads(base64.b64decode(raw_payload))
                 return payload.get("predicateType")
             except Exception as ex:
+                print(f">>{line}<<")
                 raise attestations_lib.Error(f"Error in {basename}:{pos}: {ex}.") from ex
 
-        return [parse(p, l) for p, l in enumerate(raw_attestation.split(b"\n"))]
+        lines = [l for l in raw_attestation.split(b"\n") if l]
+        return [parse(p, l) for p, l in enumerate(lines)]
 
     def _evaluate_attestation_types(self, basename, actual_types):
         if not actual_types:
@@ -206,7 +210,7 @@ class Verifier:
         if not self._PROTOCOL_RE.match(url_or_path):
             return url_or_path
 
-        dest = os.path.join(tmp_dir, os.path.dirname(url_or_path))
+        dest = os.path.join(tmp_dir, os.path.basename(url_or_path))
         download_file(url_or_path, dest)
         return dest
 

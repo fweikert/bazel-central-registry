@@ -28,8 +28,8 @@ def parse_file(attestations_json, module_name, version, registry):
     url_prefix, _, archive_basename = source_url.rpartition("/")
 
     full_locations = {
-        "source.json": registry.get_source_json_path(module_name, version),
-        "MODULE.bazel": registry.get_module_dot_bazel_path(module_name, version),
+        "source.json": str(registry.get_source_json_path(module_name, version)),
+        "MODULE.bazel": str(registry.get_module_dot_bazel_path(module_name, version)),
         archive_basename: source_url,
     }
 

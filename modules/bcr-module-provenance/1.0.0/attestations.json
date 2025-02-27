@@ -11,7 +11,7 @@
     },
     "bcr-module-provenance-v1.0.0.tar.gz": {
       "url": "https://github.com/loosebazooka/bcr-module-provenance/releases/download/v1.0.0/bcr-module-provenance-v1.0.0.tar.gz.intoto.jsonl",
-      "integrity": "sha256-cCjsorjzir366ZGGUeqIHlN0kPMSSTG1imMofJRPoZ4="
+      "integrity": "sha256-Lc8paCclCxpH2ZgDnIIStAxmbdf8omHSnJ5zucMgolo="
     }
   }
 }

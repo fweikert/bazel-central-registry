@@ -159,7 +159,6 @@ class Verifier:
                 payload = json.loads(base64.b64decode(raw_payload))
                 return payload.get("predicateType")
             except Exception as ex:
-                print(f">>{line}<<")
                 raise attestations_lib.Error(f"Error in {basename}:{pos}: {ex}.") from ex
 
         lines = [l for l in raw_attestation.split(b"\n") if l]

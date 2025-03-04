@@ -1,0 +1,17 @@
+{
+    "homepage": "https://github.com/publish-to-bcr-dev/fixture-unversioned",
+    "maintainers": [
+        {
+            "name": "Derek Cormier",
+            "email": "derek@aspect.build",
+            "github": "kormide"
+        }
+    ],
+    "repository": [
+        "github:publish-to-bcr-dev/fixture-unversioned"
+    ],
+    "versions": [
+        "0.0.3"
+    ],
+    "yanked_versions": {}
+}

@@ -1,0 +1,19 @@
+{
+    "types": [
+        "https://slsa.dev/provenance/v1"
+    ],
+    "attestations": {
+        "source.json.intoto.jsonl": {
+            "url": "https://github.com/publish-to-bcr-dev/fixture-unversioned/releases/download/v0.0.3/source.json.intoto.jsonl",
+            "integrity": "sha256-49QQCnrVhvPEIc4I4C+2q+d/IcdEOak6qNmsy0kRxF8="
+        },
+        "MODULE.bazel.intoto.jsonl": {
+            "url": "https://github.com/publish-to-bcr-dev/fixture-unversioned/releases/download/v0.0.3/MODULE.bazel.intoto.jsonl",
+            "integrity": "sha256-d1zWqWj1GsyYtczPNAzDV+S+/0KcZqXSyc+x9SHdbyE="
+        },
+        "fixture-unversioned-v0.0.3.tar.gz.intoto.jsonl": {
+            "url": "https://github.com/publish-to-bcr-dev/fixture-unversioned/releases/download/v0.0.3/fixture-unversioned-v0.0.3.tar.gz.intoto.jsonl",
+            "integrity": "sha256-5tr08hM9eN4gO9ptz9QW/1AQIEbDuuPx/ISp906THKQ="
+        }
+    }
+}

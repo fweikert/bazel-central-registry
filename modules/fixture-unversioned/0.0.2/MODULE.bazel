@@ -1,0 +1,4 @@
+module(
+    name = "fixture-unversioned",
+    version = "0.0.2",
+)

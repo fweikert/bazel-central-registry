@@ -1,0 +1,9 @@
+{
+    "integrity": "sha256-kgW7t3y6z40FaHNbkYEx7NLUqOxxUCcelgOlAm4ag6g=",
+    "strip_prefix": "fixture-multi-module-root-0.0.19",
+    "url": "https://github.com/publish-to-bcr-dev/fixture-multi-module/releases/download/v0.0.19/fixture-multi-module-root-v0.0.19.tar.gz",
+    "patches": {
+        "module_dot_bazel_version.patch": "sha256-v6GNYgKx9GcU9sahO2VxTPOZ6escwccr1xiFWObxQxY="
+    },
+    "patch_strip": 1
+}

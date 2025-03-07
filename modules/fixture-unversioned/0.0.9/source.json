@@ -1,0 +1,9 @@
+{
+    "integrity": "sha256-cjpTBb22PKVMZF95HGIWzOufr0gh0qwl73CiRGfYI4E=",
+    "strip_prefix": "fixture-unversioned-0.0.9",
+    "url": "https://github.com/publish-to-bcr-dev/fixture-unversioned/releases/download/v0.0.9/fixture-unversioned-v0.0.9.tar.gz",
+    "patches": {
+        "module_dot_bazel_version.patch": "sha256-kxwODCclR+nhf0i+wMS2uTArLmJNa+ggDJNZV7mNChc="
+    },
+    "patch_strip": 1
+}

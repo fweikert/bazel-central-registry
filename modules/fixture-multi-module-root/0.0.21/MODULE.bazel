@@ -1,0 +1,10 @@
+module(
+    name = "fixture-multi-module-root",
+    version = "0.0.21",
+)
+
+bazel_dep(name = "fixture-multi-module-sub", dev_dependency = True)
+local_path_override(
+    module_name = "fixture-multi-module-sub",
+    path = "sub/module",
+)

@@ -82,7 +82,8 @@ def main(argv=None):
                 continue
 
             module_name, version = pair
-            # TODO: figure out sets etc. process and add deps
+            # TODO: figure out sets etc. / process and add deps
+            # Goal: set of module deps (synthetic) + set of lockfiles
             for BAR in get_FOO(module_name, version, registry):
                 pass # TODO
 

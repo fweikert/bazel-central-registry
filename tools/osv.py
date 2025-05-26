@@ -18,7 +18,7 @@ from registry import download_file
 
 SCANNER_VERSION = "v2.0.2"
 SCANNER_URL_TEMPLATE = "https://github.com/google/osv-scanner/releases/download/{version}/osv-scanner_{os}_{arch}"
-GITHUB_RELEASE_URL_PATTERN = re.compile(r"https://github.com/(?P<org>[^/]+)/(?P<repo>[^/]+)/(archive/refs/tags|/releases/download)/(((?P<tag>[^/]+))/)?(?P<file>[^/]+)(\.zip|\.tar\.gz)")
+GITHUB_RELEASE_URL_PATTERN = re.compile(r"https://github.com/(?P<org>[^/]+)/(?P<repo>[^/]+)/(archive(/refs/tags)?|releases/download)/(((?P<tag>[^/]+))/)?(?P<file>[^/]+)(\.zip|\.tar\.gz)")
 
 
 def download_scanner(version, dest_dir):
@@ -72,22 +72,21 @@ def main(argv=None):
 
     tmpdir = tempfile.mkdtemp()
     try:
+        module_cache = {}
+        lockfile_cache = set()
+
         module_set = set(get_base_modules(args.check_all, args.check, registry))
-        deps_set = set()
-        seen_modules = {}
+        roots = [recurse_TODO(m, v, registry, module_cache, lockfile_cache) for m, v in module_set]
 
-        while module_set:
-            pair = module_set.pop()
-            if pair in seen_modules:
-                continue
+        # TODO: run scanner on module_cache + lockfile_cache
 
-            module_name, version = pair
-            # TODO: figure out sets etc. / process and add deps
-            # Goal: set of module deps (synthetic) + set of lockfiles
-            for BAR in get_FOO(module_name, version, registry):
-                pass # TODO
+        # TODO: report based on root and scanner results
+        for root in roots:
+            root.print("\t", 0)
 
-            seen_modules.append(pair)
+        # TODO: remove
+        print(len(module_cache))
+        print(len(set(k[0] for k in module_cache.keys())))
 
         scanner_path = download_scanner(SCANNER_VERSION, tmpdir)
     finally:
@@ -113,26 +112,61 @@ def get_latest_version(module_name, registry):
     return metadata["versions"][-1]
 
 
-def get_FOO(module_name, version, registry):
+class ModuleNode:
+
+    def __init__(self, name, version, org, repo, tag, commit):
+        self.name = name
+        self.version = version
+        self.org = org
+        self.repo = repo
+        self.tag = tag
+        self.commit = commit
+        self.deps = []
+        self.extensions = []
+
+    def print(self, indent, level):
+        print(f"{indent*level}{self.name}@{self.version}")
+        for d in self.deps:
+            d.print(indent, level+1)
+        
+        for org, repo, target in self.extensions:
+            print(f"{(indent+1)*level}- {org}/{repo}:{target}")
+
+
+def recurse_TODO(module_name, version, registry, module_cache, lockfile_cache):
+    key = (module_name, version)
+    existing = module_cache.get(key)
+    if existing:
+        return existing
+
     org, repo, tag, commit = get_release_info(module_name, version, registry)
+    node = ModuleNode(module_name, version, org, repo, tag, commit)
+
     module_deps, extension_deps = get_deps(module_name, version, registry)
 
-    # TODO: return synthetic object for this module
-    # TODO: build deps objects (lockfile vs synthetic)
-    return None, module_deps, extension_deps
+    for child_name, child_version in module_deps:
+        node.deps.append(recurse_TODO(child_name, child_version, registry, module_cache, lockfile_cache))
+
+    for e in extension_deps:
+        lockfile_cache.add(e)
+        node.extensions.append(e)
+
+    module_cache[key] = node
+    return node
 
 
 def get_release_info(module_name, version, registry):
     source = registry.get_source(module_name, version)
     m = GITHUB_RELEASE_URL_PATTERN.search(source["url"])
     if not m:
-        pass  # TODO
+        raise Exception("TODO: {}".format(source["url"]))  # TODO
 
     org, repo, tag = m.group("org"), m.group("repo"), m.group("tag") or m.group("file")
     return org, repo, tag, resolve_tag(org, repo, tag)
 
 
 def resolve_tag(org, repo, tag):
+    return f"commit_for_{tag}" # TODO: work around GitHub rate limit
     url = f"https://api.github.com/repos/{org}/{repo}/git/ref/tags/{tag}"
     data = json.loads(download(url))
     return data["object"]["sha"]
@@ -140,8 +174,25 @@ def resolve_tag(org, repo, tag):
 
 def get_deps(module_name, version, registry):
     mdb_path = registry.get_module_dot_bazel_path(module_name, version)
-    # TODO: parse and extract deps!
-    return [], []
+    with open(mdb_path, "rb") as f:
+        tree = ast.parse(f.read())
+
+    module_deps = []
+
+    for node in tree.body:
+        if (not isinstance(node, ast.Expr) or not isinstance(node.value, ast.Call) or not isinstance(node.value.func, ast.Name) or node.value.func.id != "bazel_dep"):
+           continue
+
+        kwargs = {x.arg: x.value.value for x in node.value.keywords}
+        if kwargs.get("dev_dependency"):
+            continue
+
+        module_deps.append((kwargs["name"], kwargs["version"]))
+
+        # TODO: somehow handle module extensions
+
+    return module_deps, []
+    # TODO: [("name", "version")], [("org", "repo", "target")]
 
 
 if __name__ == "__main__":

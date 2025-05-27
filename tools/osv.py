@@ -19,6 +19,7 @@ from registry import download_file
 SCANNER_VERSION = "v2.0.2"
 SCANNER_URL_TEMPLATE = "https://github.com/google/osv-scanner/releases/download/{version}/osv-scanner_{os}_{arch}"
 GITHUB_RELEASE_URL_PATTERN = re.compile(r"https://github.com/(?P<org>[^/]+)/(?P<repo>[^/]+)/(archive(/refs/tags)?|releases/download)/(((?P<tag>[^/]+))/)?(?P<file>[^/]+)(\.zip|\.tar\.gz)")
+DEV_DEPENDENCY = "dev_dependency"
 
 
 def download_scanner(version, dest_dir):
@@ -81,8 +82,8 @@ def main(argv=None):
         # TODO: run scanner on module_cache + lockfile_cache
 
         # TODO: report based on root and scanner results
-        for root in roots:
-            root.print("\t", 0)
+        # for root in roots:
+        #   root.print("\t", 0)
 
         # TODO: remove
         print(len(module_cache))
@@ -172,24 +173,48 @@ def resolve_tag(org, repo, tag):
     return data["object"]["sha"]
 
 
-def get_deps(module_name, version, registry):
+def get_deps(module_name, version, registry, include_dev_dependencies=True):
     mdb_path = registry.get_module_dot_bazel_path(module_name, version)
+
+    # TODO
+    if "aspect_rules_aws" not in str(mdb_path):
+        return [], []
+
+    # Great, now we're parsing Starlark code :(
     with open(mdb_path, "rb") as f:
         tree = ast.parse(f.read())
 
+    def parse_value(c):
+        if isinstance(c, ast.Name):
+            return f"${c.id}"
+        elif isinstance(c, ast.Constant):
+            return c.value
+        elif isinstance(c, ast.List):
+            return [parse_value(e) for e in c.elts]
+
+    def analyze_call(c):
+        if not isinstance(c, ast.Call):
+            return None, None, [], {}
+
+        owner, func = (c.func.value.id, c.func.attr) if isinstance(c.func, ast.Attribute) else (None, c.func.id)
+        return owner, func, [parse_value(a) for a in c.args], {k.arg : parse_value(k.value) for k in c.keywords}
+
     module_deps = []
-
+    extensions = set()
     for node in tree.body:
-        if (not isinstance(node, ast.Expr) or not isinstance(node.value, ast.Call) or not isinstance(node.value.func, ast.Name) or node.value.func.id != "bazel_dep"):
-           continue
+        if isinstance(node, ast.Assign):
+            _, func, args, kwargs = analyze_call(node.value)
+            if func != "use_extension" or (kwargs.get(DEV_DEPENDENCY) and not include_dev_dependencies):
+                continue
 
-        kwargs = {x.arg: x.value.value for x in node.value.keywords}
-        if kwargs.get("dev_dependency"):
-            continue
-
-        module_deps.append((kwargs["name"], kwargs["version"]))
-
-        # TODO: somehow handle module extensions
+            extensions.add(node.targets[0].id)
+        elif isinstance(node, ast.Expr):
+            owner, func, args, kwargs = analyze_call(node.value)
+            if func == "bazel_dep" and (include_dev_dependencies or not kwargs.get(DEV_DEPENDENCY)):
+                module_deps.append((kwargs["name"], kwargs["version"]))
+            elif owner in extensions:
+                # Extension method
+                print(f"EXT TODO: {owner}.{func}({args}, **{kwargs})")
 
     return module_deps, []
     # TODO: [("name", "version")], [("org", "repo", "target")]

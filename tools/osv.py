@@ -22,6 +22,37 @@ GITHUB_RELEASE_URL_PATTERN = re.compile(r"https://github.com/(?P<org>[^/]+)/(?P<
 DEV_DEPENDENCY = "dev_dependency"
 
 
+def handle_oci_extension(org, repo, tag, args, kwargs, tmpdir):
+    _ = org, repo, tag, args, tmpdir
+    # TODO: handle non-happy path
+    image = kwargs.get("image")
+    if ":" not in image:
+        image = f"{image}:{kwargs.get('tag', 'latest')}"
+
+    return f"scan image {image}"
+
+
+def handle_pip_extension(org, repo, tag, args, kwargs, tmpdir):
+    _ = args
+    # TODO: handle non-happy path
+    target = kwargs.get("requirements_lock")
+
+    # Guess source URL based on target (very hacky).
+    path_suffix = target.replace("//", "").replace(":", "/")
+    url = os.path.join(f"https://raw.githubusercontent.com/{org}/{repo}/refs/{tag}", path_suffix)
+
+    path = os.path.join(tmpdir, os.path.basename(path_suffix))
+    download_file(url, path)
+
+    return f"scan source --lockfile {path}"
+
+
+KNOWN_EXTENSIONS = {
+    ("@rules_oci//oci:extensions.bzl", "oci", "pull"): handle_oci_extension,
+    ("@rules_python//python/extensions:pip.bzl", "pip", "parse"): handle_pip_extension,
+}
+
+
 def download_scanner(version, dest_dir):
     arch = platform.machine()
     os_name = platform.system().lower()
@@ -74,12 +105,12 @@ def main(argv=None):
     tmpdir = tempfile.mkdtemp()
     try:
         module_cache = {}
-        lockfile_cache = set()
+        extension_cache = set()
 
         module_set = set(get_base_modules(args.check_all, args.check, registry))
-        roots = [recurse_TODO(m, v, registry, module_cache, lockfile_cache) for m, v in module_set]
+        roots = [recurse_TODO(m, v, registry, module_cache, extension_cache) for m, v in module_set]
 
-        # TODO: run scanner on module_cache + lockfile_cache
+        # TODO: run scanner on module_cache + extension_cache
 
         # TODO: report based on root and scanner results
         # for root in roots:
@@ -134,7 +165,7 @@ class ModuleNode:
             print(f"{(indent+1)*level}- {org}/{repo}:{target}")
 
 
-def recurse_TODO(module_name, version, registry, module_cache, lockfile_cache):
+def recurse_TODO(module_name, version, registry, module_cache, extension_cache):
     key = (module_name, version)
     existing = module_cache.get(key)
     if existing:
@@ -144,13 +175,29 @@ def recurse_TODO(module_name, version, registry, module_cache, lockfile_cache):
     node = ModuleNode(module_name, version, org, repo, tag, commit)
 
     module_deps, extension_deps = get_deps(module_name, version, registry)
+    
+    # TODO: resolve extensions
+    # TODO: handle unrecognized deps / extensions
 
     for child_name, child_version in module_deps:
-        node.deps.append(recurse_TODO(child_name, child_version, registry, module_cache, lockfile_cache))
+        node.deps.append(recurse_TODO(child_name, child_version, registry, module_cache, extension_cache))
 
     for e in extension_deps:
-        lockfile_cache.add(e)
         node.extensions.append(e)
+
+        # TODO: do we need the cache?
+        extension_cache.add(e)
+
+        # TODO: remove
+        ext_bzl, ext_name, ext_fun_name, args, kwargs = e
+        ext_resolver = KNOWN_EXTENSIONS.get(ext_bzl, ext_name, ext_fun_name)
+        if not ext_resolver:
+            # TODO: report as unknown
+            continue
+
+        tmpdir = ""  # TODO
+        cmd_args = ext_resolver(org, repo, tag, args, kwargs, tmpdir)
+        _ = cmd_args  # TODO
 
     module_cache[key] = node
     return node
@@ -176,13 +223,12 @@ def resolve_tag(org, repo, tag):
 def get_deps(module_name, version, registry, include_dev_dependencies=True):
     mdb_path = registry.get_module_dot_bazel_path(module_name, version)
 
-    # TODO
-    if "aspect_rules_aws" not in str(mdb_path):
+    # TODO: remove
+    if "aspect" not in str(mdb_path):
         return [], []
 
-    # Great, now we're parsing Starlark code :(
     with open(mdb_path, "rb") as f:
-        tree = ast.parse(f.read())
+        tree = ast.parse(f.read())  # Great, now we're parsing Starlark code :(
 
     def parse_value(c):
         if isinstance(c, ast.Name):
@@ -200,24 +246,27 @@ def get_deps(module_name, version, registry, include_dev_dependencies=True):
         return owner, func, [parse_value(a) for a in c.args], {k.arg : parse_value(k.value) for k in c.keywords}
 
     module_deps = []
-    extensions = set()
+    extension_deps = []
+    extension_registry = {}
     for node in tree.body:
         if isinstance(node, ast.Assign):
             _, func, args, kwargs = analyze_call(node.value)
             if func != "use_extension" or (kwargs.get(DEV_DEPENDENCY) and not include_dev_dependencies):
                 continue
 
-            extensions.add(node.targets[0].id)
+            # extensions[symbol] = [extension_bzl_file, extension_name]
+            extension_registry[node.targets[0].id] = args
         elif isinstance(node, ast.Expr):
             owner, func, args, kwargs = analyze_call(node.value)
-            if func == "bazel_dep" and (include_dev_dependencies or not kwargs.get(DEV_DEPENDENCY)):
+            if not owner and func == "bazel_dep" and (include_dev_dependencies or not kwargs.get(DEV_DEPENDENCY)):
                 module_deps.append((kwargs["name"], kwargs["version"]))
-            elif owner in extensions:
-                # Extension method
-                print(f"EXT TODO: {owner}.{func}({args}, **{kwargs})")
+            elif not owner and func == "archive_override":
+                print(f"LOL CALL: {owner}.{func}([{args}, **{kwargs}])")
+            elif owner in extension_registry:
+                extension_bzl_file, extension_name = extension_registry[owner]
+                extension_deps.append((extension_bzl_file, extension_name, func, args, kwargs))
 
-    return module_deps, []
-    # TODO: [("name", "version")], [("org", "repo", "target")]
+    return module_deps, extension_deps
 
 
 if __name__ == "__main__":

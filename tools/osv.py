@@ -1,5 +1,6 @@
 import argparse
 import ast
+import dataclasses
 import json
 import os
 import platform
@@ -109,22 +110,30 @@ def main(argv=None):
 
     tmpdir = tempfile.mkdtemp()
     try:
-        module_cache = {}
-        extension_cache = set()
+        TODO_all_ext = []
 
+        module_cache = {}
         module_set = set(get_base_modules(args.check_all, args.check, registry))
-        roots = [recurse_TODO(m, v, registry, module_cache, extension_cache) for m, v in module_set]
+        for m, v in module_set:
+            recurse_TODO(m, v, registry, module_cache)
+
+        for module in module_cache.values():
+            github_module, extensions = module.resolve(registry, tmpdir)
+            print(github_module)
+            print(extensions)
+
+            for k in extensions.keys():
+                TODO_all_ext.append(f"{k} ({module.name}@{module.version})")
+
+            print()
 
         # TODO: run scanner on module_cache + extension_cache
 
         # TODO: report based on root and scanner results
-        for root in roots:
-            print(root)
-            print()
 
         # TODO: remove
         print(len(module_cache))
-        print(len(set(k[0] for k in module_cache.keys())))
+        print("\n".join(sorted(TODO_all_ext)))
 
         scanner_path = download_scanner(SCANNER_VERSION, tmpdir)
     finally:
@@ -150,84 +159,81 @@ def get_latest_version(module_name, registry):
     return metadata["versions"][-1]
 
 
-class ModuleNode:
+class Module:
 
-    def __init__(self, name, version, org, repo, tag, commit):
+    def __init__(self, name, version):
         self.name = name
         self.version = version
-        self.org = org
-        self.repo = repo
-        self.tag = tag
-        self.commit = commit
-        self.deps = []
         self.extensions = []
 
+    def resolve(self, registry, tmpdir):
+        org, repo, tag = self._get_release_info(registry)
+        commit = self._resolve_tag(org, repo, tag)
+
+        ghm = GitHubModule(name=self.name, version=self.version, org=org, repo=repo, tag=tag, commit=commit)
+        return ghm, {
+            f"{ext.file}: {ext.name}.{ext.func}()": self._resolve_extension(ext, org, repo, tag, tmpdir)
+            for ext in self.extensions
+        }
+
+    def _get_release_info(self, registry):
+        source = registry.get_source(self.name, self.version)
+        m = GITHUB_RELEASE_URL_PATTERN.search(source["url"])
+        if not m:
+            raise Exception("TODO: {}".format(source["url"]))  # TODO
+
+        org, repo, tag = m.group("org"), m.group("repo"), m.group("tag") or m.group("file")
+        return org, repo, tag
+
+    def _resolve_tag(self, org, repo, tag):
+        return f"commit_for_{tag}"  # TODO: work around GitHub rate limit
+        url = f"https://api.github.com/repos/{org}/{repo}/git/ref/tags/{tag}"
+        data = json.loads(download(url))
+        return data["object"]["sha"]
+
+    def _resolve_extension(self, ext, org, repo, tag, tmpdir):
+        ext_resolver = KNOWN_EXTENSIONS.get((ext.file, ext.name, ext.func))
+        if not ext_resolver:
+            return None  # TODO: report as unknown
+
+        return ext_resolver(org, repo, tag, ext.args, ext.kwargs, tmpdir)
+
     def __str__(self):
-        return self.format("\t", 0)
-
-    def format(self, indent, level):
-        if level > 50:
-            return f"{indent*level}{self.name}@{self.version}: STOP"
-
-        parts = [f"{indent*level}{self.name}@{self.version}"]
-        parts += [d.format(indent, level + 1) for d in self.deps]
-        parts += [f"{(indent+1)*level}- {org}/{repo}:{target}" for org, repo, target in self.extensions]
-
-        return "\n".join(parts)
+        return f"{self.name}@{self.version}"
 
 
-def recurse_TODO(module_name, version, registry, module_cache, extension_cache):
+@dataclasses.dataclass(frozen=True)
+class Extension:
+    file: str
+    name: str
+    func: str
+    args: list
+    kwargs: dict
+
+
+@dataclasses.dataclass(frozen=True)
+class GitHubModule:
+    name: str
+    version: str
+    org: str
+    repo: str
+    tag: str
+    commit: str
+
+
+def recurse_TODO(module_name, version, registry, module_cache):
     key = (module_name, version)
-    existing = module_cache.get(key)
-    if existing:
-        return existing
+    if key in module_cache:
+        return
 
-    org, repo, tag, commit = get_release_info(module_name, version, registry)
-    node = ModuleNode(module_name, version, org, repo, tag, commit)
+    node = Module(module_name, version)
     module_cache[key] = node
 
-    module_deps, extension_deps = get_deps(module_name, version, registry)
-
-    # TODO: resolve extensions
-    # TODO: handle unrecognized deps / extensions
+    module_deps, extensions = get_deps(module_name, version, registry)
+    node.extensions += extensions
 
     for child_name, child_version in module_deps:
-        print(f"{module_name}@{version} -> {child_name}@{child_version}")
-        node.deps.append(recurse_TODO(child_name, child_version, registry, module_cache, extension_cache))
-
-    for e in extension_deps:
-        # TODO: do we need the cache?
-        # extension_cache.add(e)
-
-        # TODO: remove
-        ext_bzl, ext_name, ext_fun_name, args, kwargs = e
-        ext_resolver = KNOWN_EXTENSIONS.get((ext_bzl, ext_name, ext_fun_name))
-        if not ext_resolver:
-            # TODO: report as unknown
-            continue
-
-        tmpdir = ""  # TODO
-        cmd_args = ext_resolver(org, repo, tag, args, kwargs, tmpdir)
-        print(f"{org}/{repo}@{tag}: {args}, {kwargs} -> {cmd_args}")
-
-    return node
-
-
-def get_release_info(module_name, version, registry):
-    source = registry.get_source(module_name, version)
-    m = GITHUB_RELEASE_URL_PATTERN.search(source["url"])
-    if not m:
-        raise Exception("TODO: {}".format(source["url"]))  # TODO
-
-    org, repo, tag = m.group("org"), m.group("repo"), m.group("tag") or m.group("file")
-    return org, repo, tag, resolve_tag(org, repo, tag)
-
-
-def resolve_tag(org, repo, tag):
-    return f"commit_for_{tag}" # TODO: work around GitHub rate limit
-    url = f"https://api.github.com/repos/{org}/{repo}/git/ref/tags/{tag}"
-    data = json.loads(download(url))
-    return data["object"]["sha"]
+        recurse_TODO(child_name, child_version, registry, module_cache)
 
 
 def get_deps(module_name, version, registry, include_dev_dependencies=True):
@@ -251,7 +257,7 @@ def get_deps(module_name, version, registry, include_dev_dependencies=True):
         return owner, func, [parse_value(a) for a in c.args], {k.arg : parse_value(k.value) for k in c.keywords}
 
     module_deps = []
-    extension_deps = []
+    extensions = []
     extension_registry = {}
     for node in tree.body:
         if isinstance(node, ast.Assign):
@@ -269,9 +275,11 @@ def get_deps(module_name, version, registry, include_dev_dependencies=True):
                 print(f"LOL CALL: {owner}.{func}([{args}, **{kwargs}])")
             elif owner in extension_registry:
                 extension_bzl_file, extension_name = extension_registry[owner]
-                extension_deps.append((extension_bzl_file, extension_name, func, args, kwargs))
+                extensions.append(
+                    Extension(file=extension_bzl_file, name=extension_name, func=func, args=args, kwargs=kwargs)
+                )
 
-    return module_deps, extension_deps
+    return module_deps, extensions
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib
 import yaml
 
 from registry import RegistryClient
@@ -39,10 +40,14 @@ def handle_pip_extension(org, repo, tag, args, kwargs, tmpdir):
 
     # Guess source URL based on target (very hacky).
     path_suffix = target.replace("//", "").replace(":", "/")
-    url = os.path.join(f"https://raw.githubusercontent.com/{org}/{repo}/refs/{tag}", path_suffix)
+    url = f"https://raw.githubusercontent.com/{org}/{repo}/refs/tags/{tag}/{path_suffix}"
 
     path = os.path.join(tmpdir, os.path.basename(path_suffix))
-    download_file(url, path)
+    try:
+        download_file(url, path)
+    except urllib.error.HTTPError as ex:
+        # TODO
+        raise Exception(url) from ex
 
     return f"scan source --lockfile {path}"
 
@@ -54,11 +59,11 @@ KNOWN_EXTENSIONS = {
 
 
 def download_scanner(version, dest_dir):
-    arch = platform.machine()
+    arch = platform.machine().replace("x86_64", "amd64").replace("aarch64", "arm64")
     os_name = platform.system().lower()
     url = SCANNER_URL_TEMPLATE.format(version=version, os=os_name, arch=arch)
 
-    path = os.path.join(dest_dir, 'osv-scanner')   
+    path = os.path.join(dest_dir, "osv-scanner")
     download_file(url, path)
     return path
 
@@ -113,8 +118,9 @@ def main(argv=None):
         # TODO: run scanner on module_cache + extension_cache
 
         # TODO: report based on root and scanner results
-        # for root in roots:
-        #   root.print("\t", 0)
+        for root in roots:
+            print(root)
+            print()
 
         # TODO: remove
         print(len(module_cache))
@@ -156,13 +162,18 @@ class ModuleNode:
         self.deps = []
         self.extensions = []
 
-    def print(self, indent, level):
-        print(f"{indent*level}{self.name}@{self.version}")
-        for d in self.deps:
-            d.print(indent, level+1)
-        
-        for org, repo, target in self.extensions:
-            print(f"{(indent+1)*level}- {org}/{repo}:{target}")
+    def __str__(self):
+        return self.format("\t", 0)
+
+    def format(self, indent, level):
+        if level > 50:
+            return f"{indent*level}{self.name}@{self.version}: STOP"
+
+        parts = [f"{indent*level}{self.name}@{self.version}"]
+        parts += [d.format(indent, level + 1) for d in self.deps]
+        parts += [f"{(indent+1)*level}- {org}/{repo}:{target}" for org, repo, target in self.extensions]
+
+        return "\n".join(parts)
 
 
 def recurse_TODO(module_name, version, registry, module_cache, extension_cache):
@@ -173,33 +184,32 @@ def recurse_TODO(module_name, version, registry, module_cache, extension_cache):
 
     org, repo, tag, commit = get_release_info(module_name, version, registry)
     node = ModuleNode(module_name, version, org, repo, tag, commit)
+    module_cache[key] = node
 
     module_deps, extension_deps = get_deps(module_name, version, registry)
-    
+
     # TODO: resolve extensions
     # TODO: handle unrecognized deps / extensions
 
     for child_name, child_version in module_deps:
+        print(f"{module_name}@{version} -> {child_name}@{child_version}")
         node.deps.append(recurse_TODO(child_name, child_version, registry, module_cache, extension_cache))
 
     for e in extension_deps:
-        node.extensions.append(e)
-
         # TODO: do we need the cache?
-        extension_cache.add(e)
+        # extension_cache.add(e)
 
         # TODO: remove
         ext_bzl, ext_name, ext_fun_name, args, kwargs = e
-        ext_resolver = KNOWN_EXTENSIONS.get(ext_bzl, ext_name, ext_fun_name)
+        ext_resolver = KNOWN_EXTENSIONS.get((ext_bzl, ext_name, ext_fun_name))
         if not ext_resolver:
             # TODO: report as unknown
             continue
 
         tmpdir = ""  # TODO
         cmd_args = ext_resolver(org, repo, tag, args, kwargs, tmpdir)
-        _ = cmd_args  # TODO
+        print(f"{org}/{repo}@{tag}: {args}, {kwargs} -> {cmd_args}")
 
-    module_cache[key] = node
     return node
 
 
@@ -222,11 +232,6 @@ def resolve_tag(org, repo, tag):
 
 def get_deps(module_name, version, registry, include_dev_dependencies=True):
     mdb_path = registry.get_module_dot_bazel_path(module_name, version)
-
-    # TODO: remove
-    if "aspect" not in str(mdb_path):
-        return [], []
-
     with open(mdb_path, "rb") as f:
         tree = ast.parse(f.read())  # Great, now we're parsing Starlark code :(
 

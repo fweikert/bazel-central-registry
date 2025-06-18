@@ -110,30 +110,13 @@ def main(argv=None):
 
     tmpdir = tempfile.mkdtemp()
     try:
-        TODO_all_ext = []
-
-        module_cache = {}
-        module_set = set(get_base_modules(args.check_all, args.check, registry))
-        for m, v in module_set:
-            recurse_TODO(m, v, registry, module_cache)
-
-        for module in module_cache.values():
-            github_module, extensions = module.resolve(registry, tmpdir)
-            print(github_module)
-            print(extensions)
-
-            for k in extensions.keys():
-                TODO_all_ext.append(f"{k} ({module.name}@{module.version})")
-
-            print()
-
-        # TODO: run scanner on module_cache + extension_cache
-
-        # TODO: report based on root and scanner results
-
-        # TODO: remove
-        print(len(module_cache))
-        print("\n".join(sorted(TODO_all_ext)))
+        modules = collect_modules(args.check_all, args.check, registry)
+        github_deps, extension_commands, unknown_extensions = resolve_modules_and_extensions(modules, registry, tmpdir)
+        print("\n".join(str(g) for g in github_deps))
+        print()
+        print("\n".join(extension_commands))
+        print()
+        print("\n".join(sorted(unknown_extensions)))
 
         scanner_path = download_scanner(SCANNER_VERSION, tmpdir)
     finally:
@@ -157,6 +140,34 @@ def parse_module_version(value):
 def get_latest_version(module_name, registry):
     metadata = registry.get_metadata(module_name)
     return metadata["versions"][-1]
+
+
+def collect_modules(check_all, check, registry):
+    module_cache = {}
+    root_modules = set(get_base_modules(check_all, check, registry))
+    for m, v in root_modules:
+        traverse_module_tree(m, v, registry, module_cache)
+
+    return module_cache.values()
+
+
+def resolve_modules_and_extensions(modules, registry, tmpdir):
+    github_deps = []
+    extension_commands = []
+    unknown_extensions = []
+
+    for module in modules:
+        github_module, extensions = module.resolve(registry, tmpdir)
+        if github_module:
+            github_deps.append(github_module)
+
+        for k, v in extensions.items():
+            if v:
+                extension_commands.append(v)
+            else:
+                unknown_extensions.append(f"{k} (from {module.name}@{module.version})")
+
+    return github_deps, extension_commands, unknown_extensions
 
 
 class Module:
@@ -201,6 +212,9 @@ class Module:
     def __str__(self):
         return f"{self.name}@{self.version}"
 
+    def __hash__(self):
+        return str(self)
+
 
 @dataclasses.dataclass(frozen=True)
 class Extension:
@@ -221,7 +235,7 @@ class GitHubModule:
     commit: str
 
 
-def recurse_TODO(module_name, version, registry, module_cache):
+def traverse_module_tree(module_name, version, registry, module_cache):
     key = (module_name, version)
     if key in module_cache:
         return
@@ -233,7 +247,7 @@ def recurse_TODO(module_name, version, registry, module_cache):
     node.extensions += extensions
 
     for child_name, child_version in module_deps:
-        recurse_TODO(child_name, child_version, registry, module_cache)
+        traverse_module_tree(child_name, child_version, registry, module_cache)
 
 
 def get_deps(module_name, version, registry, include_dev_dependencies=True):

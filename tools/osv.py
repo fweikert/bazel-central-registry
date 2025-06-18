@@ -1,17 +1,16 @@
 import argparse
 import ast
+import collections
 import dataclasses
 import json
 import os
 import platform
 import re
-import requests
 import shutil
 import subprocess
 import sys
 import tempfile
 import urllib
-import yaml
 
 from registry import RegistryClient
 from registry import download
@@ -35,10 +34,14 @@ def handle_oci_extension(org, repo, tag, args, kwargs, tmpdir):
 
 
 def handle_pip_extension(org, repo, tag, args, kwargs, tmpdir):
-    _ = args
+    del args  # unused
     # TODO: handle non-happy path
     target = kwargs.get("requirements_lock")
+    path = download_target(org, repo, tag, target, tmpdir)
+    return f"scan source --lockfile {path}"
 
+
+def download_target(org, repo, tag, target, tmpdir):
     # Guess source URL based on target (very hacky).
     path_suffix = target.replace("//", "").replace(":", "/")
     url = f"https://raw.githubusercontent.com/{org}/{repo}/refs/tags/{tag}/{path_suffix}"
@@ -50,12 +53,28 @@ def handle_pip_extension(org, repo, tag, args, kwargs, tmpdir):
         # TODO
         raise Exception(url) from ex
 
+    return path
+
+
+def handle_maven_extension(org, repo, tag, args, kwargs, tmpdir):
+    del args  # unused
+
+    artifacts = kwargs.get("artifacts")
+    boms = kwargs.get("boms")
+
+    # TODO: resolve variables (must happen outside of this func)
+    print(artifacts)
+    print(boms)
+
+    path = "TODO"  # TODO: generate pom.xml based on artifacts (and boms?)
     return f"scan source --lockfile {path}"
 
 
 KNOWN_EXTENSIONS = {
     ("@rules_oci//oci:extensions.bzl", "oci", "pull"): handle_oci_extension,
+    ("//python/extensions:pip.bzl", "pip", "parse"): handle_pip_extension,
     ("@rules_python//python/extensions:pip.bzl", "pip", "parse"): handle_pip_extension,
+    ("@rules_jvm_external//:extensions.bzl", "maven", "install"): handle_maven_extension,
 }
 
 
@@ -116,9 +135,15 @@ def main(argv=None):
         print()
         print("\n".join(extension_commands))
         print()
-        print("\n".join(sorted(unknown_extensions)))
+        for k, v in unknown_extensions.items():
+            print(f"{k}: {', '.join(v)}")
 
         scanner_path = download_scanner(SCANNER_VERSION, tmpdir)
+
+        # TODO:
+        # 1. scan modules in batches
+        # 2. scan extension lockfiles
+        # 3. report results, incl. unknown extensions
     finally:
         shutil.rmtree(tmpdir)
 
@@ -154,7 +179,7 @@ def collect_modules(check_all, check, registry):
 def resolve_modules_and_extensions(modules, registry, tmpdir):
     github_deps = []
     extension_commands = []
-    unknown_extensions = []
+    unknown_extensions = collections.defaultdict(list)
 
     for module in modules:
         github_module, extensions = module.resolve(registry, tmpdir)
@@ -165,7 +190,7 @@ def resolve_modules_and_extensions(modules, registry, tmpdir):
             if v:
                 extension_commands.append(v)
             else:
-                unknown_extensions.append(f"{k} (from {module.name}@{module.version})")
+                unknown_extensions[k].append(f"{module.name}@{module.version}")
 
     return github_deps, extension_commands, unknown_extensions
 
@@ -183,7 +208,7 @@ class Module:
 
         ghm = GitHubModule(name=self.name, version=self.version, org=org, repo=repo, tag=tag, commit=commit)
         return ghm, {
-            f"{ext.file}: {ext.name}.{ext.func}()": self._resolve_extension(ext, org, repo, tag, tmpdir)
+            f"{ext.file}:{ext.name}.{ext.func}()": self._resolve_extension(ext, org, repo, tag, tmpdir)
             for ext in self.extensions
         }
 
